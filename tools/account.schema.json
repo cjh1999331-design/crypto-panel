@@ -1,0 +1,530 @@
+{
+  "type": "object",
+  "properties": {
+    "mode": {
+      "enum": [
+        "paper",
+        "live"
+      ]
+    },
+    "source": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "accounts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^(paper|live)_[a-z0-9_]+$"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "mode": {
+            "enum": [
+              "paper",
+              "live"
+            ]
+          },
+          "status": {
+            "enum": [
+              "未启动",
+              "运行中",
+              "已停手",
+              "事件窗口禁开新仓",
+              "已停止"
+            ]
+          },
+          "equity": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "balance": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "daily_pnl": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "daily_loss_limit": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "exclusiveMinimum": 0,
+            "maximum": 1
+          },
+          "positions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "symbol": {
+                  "type": "string",
+                  "pattern": "^[A-Z0-9]+-USDT-SWAP$"
+                },
+                "side": {
+                  "enum": [
+                    -1,
+                    1
+                  ]
+                },
+                "qty": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "entry": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "stop": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "margin": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "liquidation_price": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "leverage": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "take_profit": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "mark_price": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "unrealized_pnl": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "entry_time": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "symbol",
+                "side",
+                "qty",
+                "entry",
+                "stop",
+                "leverage",
+                "take_profit",
+                "mark_price",
+                "unrealized_pnl"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "fills": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "timestamp": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "symbol": {
+                  "type": "string",
+                  "pattern": "^[A-Z0-9]+-USDT-SWAP$"
+                },
+                "side": {
+                  "enum": [
+                    -1,
+                    1,
+                    null
+                  ]
+                },
+                "kind": {
+                  "enum": [
+                    "open",
+                    "close"
+                  ]
+                },
+                "qty": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "price": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "notional": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "pnl": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "timestamp",
+                "symbol",
+                "side",
+                "kind",
+                "qty",
+                "price",
+                "notional",
+                "pnl"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "equity_curve": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "timestamp": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "equity": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "timestamp",
+                "equity"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "updated_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "initial": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "day": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+          },
+          "day_start": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "risk": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "risk_per_trade": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "daily_loss_limit": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 1
+              },
+              "max_positions": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1
+              },
+              "leverage": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "exclusiveMinimum": 0
+              },
+              "same_direction_risk_limit": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 1
+              },
+              "leverage_tiers": {
+                "type": "object",
+                "properties": {
+                  "turnover_gte_50000000": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "turnover_lt_50000000": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  },
+                  "threshold_usdt": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
+                },
+                "required": [
+                  "turnover_gte_50000000",
+                  "turnover_lt_50000000",
+                  "threshold_usdt"
+                ],
+                "additionalProperties": false
+              },
+              "blocked": {
+                "type": "boolean"
+              },
+              "legacy_defaults": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "risk_per_trade",
+              "daily_loss_limit",
+              "max_positions",
+              "leverage",
+              "blocked"
+            ],
+            "additionalProperties": false
+          },
+          "strategies": {
+            "type": "object",
+            "propertyNames": {
+              "enum": [
+                "ema",
+                "breakout",
+                "mean_reversion"
+              ]
+            },
+            "additionalProperties": {
+              "type": "object",
+              "propertyNames": {
+                "enum": [
+                  "fast",
+                  "slow",
+                  "lookback",
+                  "volume",
+                  "rsi",
+                  "trend"
+                ]
+              },
+              "additionalProperties": {
+                "type": "number"
+              }
+            }
+          },
+          "strategy_enabled": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "mode",
+          "status",
+          "equity",
+          "balance",
+          "daily_pnl",
+          "daily_loss_limit",
+          "positions",
+          "fills",
+          "equity_curve"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "decisions": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "enum": [
+            "active",
+            "missing"
+          ]
+        },
+        "updated_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "meeting": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 80
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 40
+        },
+        "symbols": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "pattern": "^[A-Z0-9]+-USDT-SWAP$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "bias": {
+                "enum": [
+                  "long",
+                  "short",
+                  "watch",
+                  "ban"
+                ]
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 200
+              },
+              "size_factor": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "required": [
+              "bias",
+              "note",
+              "size_factor"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "blackout_windows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "start": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "end": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "symbols": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^(\\*|[A-Z0-9]+-USDT-SWAP)$"
+                }
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 200
+              }
+            },
+            "required": [
+              "start",
+              "end",
+              "symbols",
+              "reason"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "global_size_factor": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "required": [
+        "status",
+        "updated_at",
+        "meeting",
+        "version",
+        "symbols",
+        "blackout_windows",
+        "global_size_factor"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "mode",
+    "source",
+    "updated_at",
+    "accounts",
+    "decisions"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "MODI public account snapshot",
+  "description": "Public aliases only. No credentials, private account identifiers or arbitrary metadata. Null means unavailable."
+}

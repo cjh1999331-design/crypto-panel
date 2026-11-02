@@ -1,0 +1,51 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { ROLES, validTeam, teamCards, teamTime, filteredLogs, timelineMarkup, gradeMarkup } from '../assets/team.mjs';
+const data = JSON.parse(execFileSync('python3',['-c', `import sys,json;sys.path.insert(0,'tools');from make_snapshot import build_team;print(json.dumps(build_team('tests/fixtures/team')))`],{encoding:'utf8'}));
+test('团队空数据：六张待命卡、无评级、暂无记录', () => {
+  const empty = {schema_version:1,status:{roles:{}},log:[]};
+  assert.equal(validTeam(empty),true);
+  const cards=teamCards(empty);
+  assert.equal((cards.match(/class="role-card/g)||[]).length,6);
+  for (const name of Object.values(ROLES)) assert.ok(cards.includes(name));
+  assert.equal((cards.match(/>待命</g)||[]).length,6);
+  assert.equal((cards.match(/grade-none/g)||[]).length,6);
+  assert.match(timelineMarkup(empty),/暂无记录/);
+  assert.equal(teamTime(null),'—');
+});
+test('团队示例：评级颜色、UTC+7、摘要和当前任务', () => {
+  assert.equal(validTeam(data),true);
+  const cards=teamCards(data,{tech:'六条件 4/6'});
+  assert.match(cards,/工作中/);assert.match(cards,/已完成/);assert.match(cards,/待命/);
+  assert.match(cards,/六条件 4\/6/);assert.match(cards,/核对突破六条件/);
+  assert.match(teamTime('2026-11-02T13:35:00Z'),/20:35 UTC\+7/);
+  for(const grade of ['A','B']) assert.match(gradeMarkup(grade),/grade-good/);
+  assert.match(gradeMarkup('C'),/grade-mid/);
+  for(const grade of ['D','E','F']) assert.match(gradeMarkup(grade),/grade-bad/);
+  assert.match(gradeMarkup(null),/grade-none.*—/);
+  const timeline=timelineMarkup(data);
+  assert.match(timeline,/政策消息整理/);assert.match(timeline,/P7|P6/);
+});
+test('角色和会议筛选可组合，结果倒序，筛空显示暂无记录', () => {
+  assert.equal(filteredLogs(data).length,8);
+  assert.equal(filteredLogs(data,'tech').length,2);
+  assert.equal(filteredLogs(data,'tech','示例会议乙').length,1);
+  assert.match(timelineMarkup(data,'risk','示例会议乙'),/暂无记录/);
+  const rows=filteredLogs({...data,log:[...data.log].reverse()});
+  assert.ok(rows.every((r,i)=>!i||Date.parse(rows[i-1].ts)>=Date.parse(r.ts)));
+});
+test('所有文本转义，最新日志优先于较旧的状态报告，不接受非法团队结构', () => {
+  const special='<img src=x onerror=alert(1)>';
+  const changed=structuredClone(data);changed.status.roles.tech.task=special;
+  changed.status.roles.tech.last_report=null;
+  changed.log[1].title=special;changed.log[1].summary=special;changed.log[1].meeting=special;
+  assert.ok(!teamCards(changed,{tech:special}).includes('<img'));
+  assert.ok(!timelineMarkup(changed).includes('<img'));
+  changed.status.roles.tech.last_report={...changed.log[1],ts:'2026-11-01T00:00:00Z',title:'过期报告'};
+  assert.ok(!teamCards(changed).includes('过期报告'));
+  assert.equal(validTeam({...data,log:[{...data.log[0],role:'bad'}]}),false);
+  assert.equal(validTeam({...data,log:[{...data.log[0],grade:'G'}]}),false);
+  assert.equal(validTeam({...data,log:[{...data.log[0],ts:'2026-11-02T13:00:00'}]}),false);
+  assert.equal(validTeam({...data,status:{roles:[]}}),false);
+});

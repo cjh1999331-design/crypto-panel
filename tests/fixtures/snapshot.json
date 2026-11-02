@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-11-02T13:40:00Z",
+  "accounts": [
+    {
+      "id": "paper_4h",
+      "name": "4 小时 · 稳健",
+      "status": "已停止",
+      "balance": 100,
+      "marked_equity": 100,
+      "initial": 100,
+      "day": "2026-11-02",
+      "day_start": 100,
+      "positions": [],
+      "trades": [],
+      "equity": [
+        {
+          "timestamp": "2026-11-02T10:00:00Z",
+          "equity": 100.0
+        },
+        {
+          "timestamp": "2026-11-02T11:00:00Z",
+          "equity": 100.1
+        },
+        {
+          "timestamp": "2026-11-02T12:00:00Z",
+          "equity": 100.2
+        },
+        {
+          "timestamp": "2026-11-02T13:00:00Z",
+          "equity": 100.3
+        }
+      ],
+      "risk": {
+        "risk_per_trade": 0.01,
+        "daily_loss_limit": 0.05,
+        "max_positions": 3,
+        "leverage": 3,
+        "blocked": true,
+        "legacy_defaults": true
+      },
+      "updated_at": "2026-11-02T13:40:00Z"
+    },
+    {
+      "id": "paper_1h",
+      "name": "1 小时 · 稳健",
+      "status": "已停止",
+      "balance": 101,
+      "marked_equity": 101,
+      "initial": 100,
+      "day": "2026-11-02",
+      "day_start": 100,
+      "positions": [],
+      "trades": [],
+      "equity": [
+        {
+          "timestamp": "2026-11-02T10:00:00Z",
+          "equity": 101.0
+        },
+        {
+          "timestamp": "2026-11-02T11:00:00Z",
+          "equity": 101.1
+        },
+        {
+          "timestamp": "2026-11-02T12:00:00Z",
+          "equity": 101.2
+        },
+        {
+          "timestamp": "2026-11-02T13:00:00Z",
+          "equity": 101.3
+        }
+      ],
+      "risk": {
+        "risk_per_trade": 0.01,
+        "daily_loss_limit": 0.05,
+        "max_positions": 3,
+        "leverage": 3,
+        "blocked": true,
+        "legacy_defaults": true
+      },
+      "updated_at": "2026-11-02T13:40:00Z"
+    },
+    {
+      "id": "paper_4h_aggr",
+      "name": "4 小时 · 进取",
+      "status": "已停止",
+      "balance": 102,
+      "marked_equity": 102,
+      "initial": 100,
+      "day": "2026-11-02",
+      "day_start": 100,
+      "positions": [],
+      "trades": [],
+      "equity": [
+        {
+          "timestamp": "2026-11-02T10:00:00Z",
+          "equity": 102.0
+        },
+        {
+          "timestamp": "2026-11-02T11:00:00Z",
+          "equity": 102.1
+        },
+        {
+          "timestamp": "2026-11-02T12:00:00Z",
+          "equity": 102.2
+        },
+        {
+          "timestamp": "2026-11-02T13:00:00Z",
+          "equity": 102.3
+        }
+      ],
+      "risk": {
+        "risk_per_trade": 0.01,
+        "daily_loss_limit": 0.05,
+        "max_positions": 3,
+        "leverage": 3,
+        "blocked": true,
+        "legacy_defaults": true
+      },
+      "updated_at": "2026-11-02T13:40:00Z"
+    },
+    {
+      "id": "paper_1h_aggr",
+      "name": "1 小时 · 进取",
+      "status": "已停止",
+      "balance": 103,
+      "marked_equity": 103,
+      "initial": 100,
+      "day": "2026-11-02",
+      "day_start": 100,
+      "positions": [],
+      "trades": [],
+      "equity": [
+        {
+          "timestamp": "2026-11-02T10:00:00Z",
+          "equity": 103.0
+        },
+        {
+          "timestamp": "2026-11-02T11:00:00Z",
+          "equity": 103.1
+        },
+        {
+          "timestamp": "2026-11-02T12:00:00Z",
+          "equity": 103.2
+        },
+        {
+          "timestamp": "2026-11-02T13:00:00Z",
+          "equity": 103.3
+        }
+      ],
+      "risk": {
+        "risk_per_trade": 0.01,
+        "daily_loss_limit": 0.05,
+        "max_positions": 3,
+        "leverage": 3,
+        "blocked": true,
+        "legacy_defaults": true
+      },
+      "updated_at": "2026-11-02T13:40:00Z"
+    },
+    {
+      "id": "paper_main",
+      "name": "主力盘",
+      "status": "运行中",
+      "balance": 104,
+      "marked_equity": 104,
+      "initial": 100,
+      "day": "2026-11-02",
+      "day_start": 100,
+      "positions": [],
+      "trades": [],
+      "equity": [
+        {
+          "timestamp": "2026-11-02T10:00:00Z",
+          "equity": 104.0
+        },
+        {
+          "timestamp": "2026-11-02T11:00:00Z",
+          "equity": 104.1
+        },
+        {
+          "timestamp": "2026-11-02T12:00:00Z",
+          "equity": 104.2
+        },
+        {
+          "timestamp": "2026-11-02T13:00:00Z",
+          "equity": 104.3
+        }
+      ],
+      "risk": {
+        "risk_per_trade": 0.01,
+        "daily_loss_limit": 0.05,
+        "max_positions": 3,
+        "leverage": 3,
+        "blocked": false,
+        "legacy_defaults": false
+      },
+      "updated_at": "2026-11-02T13:40:00Z"
+    },
+    {
+      "id": "paper_meeting",
+      "name": "交易室盘",
+      "status": "运行中",
+      "balance": 105,
+      "marked_equity": 105,
+      "initial": 100,
+      "day": "2026-11-02",
+      "day_start": 100,
+      "positions": [],
+      "trades": [],
+      "equity": [
+        {
+          "timestamp": "2026-11-02T10:00:00Z",
+          "equity": 105.0
+        },
+        {
+          "timestamp": "2026-11-02T11:00:00Z",
+          "equity": 105.1
+        },
+        {
+          "timestamp": "2026-11-02T12:00:00Z",
+          "equity": 105.2
+        },
+        {
+          "timestamp": "2026-11-02T13:00:00Z",
+          "equity": 105.3
+        }
+      ],
+      "risk": {
+        "risk_per_trade": 0.01,
+        "daily_loss_limit": 0.05,
+        "max_positions": 3,
+        "leverage": 3,
+        "blocked": false,
+        "legacy_defaults": false
+      },
+      "updated_at": "2026-11-02T13:40:00Z"
+    }
+  ]
+}

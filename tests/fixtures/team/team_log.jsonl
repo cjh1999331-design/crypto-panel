@@ -1,0 +1,8 @@
+{"ts": "2026-11-02T20:35:00+07:00", "title": "会议结论汇总", "summary": "各角色报告已归集，继续等待关键条件确认。", "grade": "A", "role": "umi", "phase": "P1", "meeting": "示例会议甲", "status": "工作中", "id": "example-0"}
+{"ts": "2026-11-02T20:36:00+07:00", "title": "技术结构复核", "summary": "量能与均线方向一致，仍需关注突破后的收盘表现。", "grade": "B", "role": "tech", "phase": "P2", "meeting": "示例会议甲", "status": "已完成", "id": "example-1"}
+{"ts": "2026-11-02T20:37:00+07:00", "title": "行业资金观察", "summary": "板块活跃度提升，关注资金流向是否持续。", "grade": "C", "role": "industry", "phase": "P3", "meeting": "示例会议甲", "status": "待命", "id": "example-2"}
+{"ts": "2026-11-02T20:38:00+07:00", "title": "政策消息整理", "summary": "公开消息已整理，等待后续正式公告。", "grade": "D", "role": "news", "phase": "P4", "meeting": "示例会议甲", "status": "工作中", "id": "example-3"}
+{"ts": "2026-11-02T20:39:00+07:00", "title": "风险边界检查", "summary": "当前风险在预算内，未满足条件时维持观察。", "grade": "E", "role": "risk", "phase": "P5", "meeting": "示例会议甲", "status": "已完成", "id": "example-4"}
+{"ts": "2026-11-02T20:40:00+07:00", "title": "交易执行准备", "summary": "执行方案已核对，等待价格与流动性条件。", "grade": null, "role": "trader", "phase": "P6", "meeting": "示例会议甲", "status": "待命", "id": "example-5"}
+{"ts": "2026-11-02T19:00:00+07:00", "title": "会议结论汇总", "summary": "各角色报告已归集，继续等待关键条件确认。", "grade": "F", "role": "umi", "phase": "P0", "meeting": "示例会议乙", "status": "工作中", "id": "earlier-0"}
+{"ts": "2026-11-02T19:01:00+07:00", "title": "技术结构复核", "summary": "量能与均线方向一致，仍需关注突破后的收盘表现。", "grade": null, "role": "tech", "phase": "P0", "meeting": "示例会议乙", "status": "已完成", "id": "earlier-1"}
