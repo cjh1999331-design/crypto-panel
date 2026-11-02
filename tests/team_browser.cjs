@@ -9,6 +9,7 @@ const populated = JSON.parse(execFileSync('python3',['-c',"import sys,json;sys.p
 populated.generated_at=populated.status.updated_at=new Date().toISOString();
 const market = fixture('market.json');
 const snapshot = fixture('snapshot.json');
+snapshot.generated_at=new Date().toISOString();
 // Adapt the existing account fixtures to the public account.json contract.
 const publicSnapshot = {
  mode:'paper',source:'测试公开快照',updated_at:snapshot.generated_at,
@@ -37,17 +38,20 @@ const base = process.env.PANEL_URL || 'http://127.0.0.1:8018/';
   await page.goto(base);
   await page.waitForFunction(()=>!document.querySelector('#team-updated').textContent.includes('等待团队数据'));
   assert.equal(await page.locator('.role-card').count(),6);
+  await page.route('**/paper/snapshot.json?*',route=>route.fulfill({json:snapshot}));
+  await page.route('**/paper/account.json?*',route=>route.fulfill({json:publicSnapshot}));
   await page.route('**/paper/team.json?*',route=>route.fulfill({json:fixture('team-empty.json')}));
   await page.reload();
   await page.evaluate(()=>{document.querySelector('#timeline-fold').open=true;});
   await page.waitForFunction(()=>document.querySelector('#team-updated').textContent.includes('团队待命'));
   await page.waitForFunction(()=>document.querySelectorAll('#conditions li').length===6 && document.querySelectorAll('#price-chart canvas').length>0);
   assert.equal(await page.locator('.role-card').count(),6);
-  assert.equal(await page.locator('.team-badge.offline').count(),6);
+  assert.equal(await page.locator('.team-badge.idle').count(),6);
+  assert.equal(await page.locator('.state-offline').count(),0);
   assert.equal(await page.locator('.grade-none').count(),6);
   assert.equal(await page.locator('#team-timeline').innerText(),'暂无记录');
   await page.screenshot({path:path.join(artifacts,'team-empty-desktop.png')});
-  console.log('真实数据 HTTP 加载通过；空团队示例：6 张离线卡、无评级、暂无记录');
+  console.log('真实数据 HTTP 加载通过；快照新鲜、空团队：6 张待命卡、无评级、暂无记录');
 
   await page.route('**/paper/team.json?*',route=>route.fulfill({json:populated}));
   await page.route('**/paper/snapshot.json?*',route=>route.fulfill({json:snapshot}));

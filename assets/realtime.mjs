@@ -1,3 +1,4 @@
+import { mainAccounts } from './account.mjs';
 // OKX public read-only transport. Open sockets are not evidence of live data.
 export const backoffDelay = failures => Math.min(30000,1000*2**Math.max(0,failures-1));
 export class PublicStream {
@@ -41,7 +42,7 @@ export class PublicStream {
     if(this.failures>=this.maxFailures){this.stateChange('轮询','实时连接连续失败，回退 REST');return;}
     this.stateChange('离线','连接中断，指数退避重连');this.later(()=>this.connect(),backoffDelay(this.failures));
   }
-  stop(){this.stopped=true;for(const timer of this.timers)clearTimeout(timer);this.timers.clear();if(this.socket){this.socket.onclose=null;this.socket.close();this.socket=null;}}
+  stop(){this.stopped=true;for(const timer of this.timers)clearTimeout(timer);this.timers.clear();if(this.socket){if(this.socket.readyState===1)this.socket.send(JSON.stringify({op:'unsubscribe',args:this.args}));this.socket.onclose=null;this.socket.onmessage=null;this.socket.onopen=null;this.socket.close();this.socket=null;}}
 }
 export function mergeCandle(bars,bar){
   if(!bar || !Number.isFinite(bar.time))return bars;
@@ -51,9 +52,9 @@ export function mergeCandle(bars,bar){
 }
 export function tradeMarkers(account,symbol,bars){
   if(!bars.length)return [];
-  const rows=(account?.accounts || []).flatMap(a=>[
-    ...a.fills.filter(f=>f.symbol===symbol),
-    ...a.positions.filter(p=>p.symbol===symbol && p.entry_time && !a.fills.some(f=>f.symbol===symbol && f.kind==='open' && Math.abs(Date.parse(f.timestamp)-Date.parse(p.entry_time))<1000)).map(p=>({...p,timestamp:p.entry_time,kind:'open'}))
+  const rows=mainAccounts(account).flatMap(a=>[
+    ...(a.fills || []).filter(f=>f.symbol===symbol),
+    ...a.positions.filter(p=>p.symbol===symbol && p.entry_time && !(a.fills || []).some(f=>f.symbol===symbol && f.kind==='open' && Math.abs(Date.parse(f.timestamp)-Date.parse(p.entry_time))<1000)).map(p=>({...p,timestamp:p.entry_time,kind:'open'}))
   ]);
   const seen=new Set();
   return rows.sort((a,b)=>Date.parse(a.timestamp)-Date.parse(b.timestamp)).flatMap(f=>{
@@ -61,6 +62,6 @@ export function tradeMarkers(account,symbol,bars){
     if(ts<bars[0].time)return [];
     const bar=[...bars].reverse().find(b=>b.time<=ts);if(!bar)return [];
     const key=[bar.time,f.kind,f.side].join('/');if(seen.has(key))return [];seen.add(key);
-    return [{time:bar.time,position:f.kind==='open'?'belowBar':'aboveBar',color:f.kind==='open'?'#22d3ee':'#ec4899',shape:f.kind==='open'?'arrowUp':'arrowDown',text:`${f.kind==='open'?'开仓':'平仓'}${f.side===1?'多':f.side===-1?'空':''}`}];
+    return [{time:bar.time,position:f.kind==='open'?'belowBar':'aboveBar',color:f.kind==='open'?'#06727d':'#c53045',shape:f.kind==='open'?'arrowUp':'arrowDown',text:`${f.kind==='open'?'开仓':'平仓'}${f.side===1?'多':f.side===-1?'空':''}`}];
   });
 }

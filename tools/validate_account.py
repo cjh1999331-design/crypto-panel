@@ -76,8 +76,11 @@ def validate_account(data):
         if account['status'] == '未启动':
             if any(account[k] is not None for k in ('equity','balance','daily_pnl','daily_loss_limit')) or any(account[k] for k in ('positions','fills','equity_curve')):
                 raise ValueError('未启动账户不得包含虚构指标')
-        elif any(account[k] is None for k in ('equity','balance','daily_loss_limit')):
+        elif any(account[k] is None for k in ('equity','balance')) or (account['daily_loss_limit'] is None and not (account['status']=='暂停' and data.get('pause', {}).get('reset'))):
             raise ValueError('已启动账户缺少金额或风控')
+        for row in [*account['positions'], *account.get('manual_status', []), *account.get('pending_orders', [])]:
+            if row.get('qty_unit') == 'contracts' and not (isinstance(row.get('ctVal'), (int, float)) and row['ctVal'] > 0):
+                raise ValueError('合约张数缺少面值')
         for fill in account['fills']:
             if not math.isclose(fill['notional'], fill['qty'] * fill['price'], rel_tol=1e-8):
                 raise ValueError('成交额与数量价格不一致')

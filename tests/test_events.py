@@ -58,7 +58,7 @@ class EventsTests(unittest.TestCase):
                  source_url='https://www.okx.com/markets',id='PRIVATE_SENTINEL',api_key='PRIVATE_SENTINEL')
         row=m.clean_alert(raw)
         self.assertEqual(row['type'],'异动');self.assertEqual(row['coin'],'BTC-USDT-SWAP')
-        self.assertEqual(row['reason'],'放量 · 2.5 · 成交额上升')
+        self.assertEqual(row['reason'],'放量 · 2.5')
         self.assertEqual(row['source_url'],raw['source_url'])
         self.assertNotIn('PRIVATE_SENTINEL',json.dumps(row))
         for url in ['http://www.okx.com/a','file:///private','javascript:alert(1)','https://localhost/a',

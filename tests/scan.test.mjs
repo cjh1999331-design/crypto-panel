@@ -29,7 +29,7 @@ test('最新开仓优先；支持任意持仓币和信号币；空仓回退今�
 });
 test('策略与入场方式读取快照，单策略 maker 与缺失配置可识别',()=>{
   assert.deepEqual(strategyEntries({enabled_strategies:['mean_reversion'],strategies:{mean_reversion:{},breakout:{}},entry_mode_by_strategy:{mean_reversion:'maker',breakout:'taker'}}),[{name:'mean_reversion',mode:'maker'}]);
-  assert.deepEqual(strategyEntries({strategies:{breakout:{}}}),[{name:'breakout',mode:null}]);
+  assert.deepEqual(strategyEntries({strategies:{breakout:{}}}),[]);
 });
 test('扫描契约拒绝非法方向、持仓状态和非数值成交额',()=>{
   for(const update of [{held:1},{signals:{mean_reversion:2}},{quote_24h:'100'}])assert.equal(validScan({...scan,instruments:[{...scan.instruments[0],...update}]}),false);

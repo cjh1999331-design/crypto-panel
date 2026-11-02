@@ -164,6 +164,41 @@ def iso(value):
         return None
 
 
+def pause_metadata(root):
+    """Read only the public pause allowlist; never follow local archive pointers."""
+    path = Path(root) / 'paper_main' / 'PAUSED.json'
+    if not path.exists(): return None
+    raw = json.loads(path.read_text(encoding='utf-8'))
+    if raw.get('paused') is not True: return None
+    reset_at = iso(raw.get('reset_at')) if raw.get('reset') is True else None
+    if raw.get('reset') is True and not reset_at: raise ValueError('重置时间无效')
+    return dict(paused=True, reset=raw.get('reset') is True, reset_at=reset_at,
+                since=max(filter(None, [iso(raw.get('since')), reset_at]), default=None),
+                message='模拟盘已暂停，等待重新开始' if reset_at else '模拟盘已暂停',
+                next_initial_equity=numeric(raw.get('next_initial_equity'), 100),
+                final_equity=numeric(raw.get('final_equity')))
+
+
+def reset_cutoff(root):
+    return (pause_metadata(root) or {}).get('reset_at')
+
+
+def after_reset(stamp, cutoff):
+    return not cutoff or bool(iso(stamp) and iso(stamp) >= cutoff)
+
+
+def filter_team_reset(team, cutoff):
+    if not cutoff: return team
+    team['log'] = [r for r in team['log'] if after_reset(r['ts'], cutoff)]
+    status = team['status']
+    if not after_reset(status['updated_at'], cutoff):
+        team['status'] = dict(updated_at=None, meeting=None, phase=None, roles={})
+    else:
+        for role in status['roles'].values():
+            if role['last_report'] and not after_reset(role['last_report']['ts'], cutoff): role['last_report'] = None
+    return team
+
+
 def read_csv(path):
     with path.open(encoding='utf-8', newline='') as handle:
         return list(csv.DictReader(handle))
@@ -176,12 +211,33 @@ def downsample(points, limit=500):
     return [points[round(i * (len(points) - 1) / (limit - 1))] for i in range(limit)]
 
 
-def clean_position(symbol, data):
+def quantity_fields(data, spec=None):
+    """Runner quantity is base currency; only explicit contract counts use ctVal."""
+    spec = spec if isinstance(spec, dict) else {}
+    ct_val = numeric(data.get('ctVal', spec.get('ctVal')))
+    ct_mult = numeric(data.get('ctMult', spec.get('ctMult')), 1)
+    qty = numeric(data.get('qty', data.get('quantity')))
+    contracts = numeric(data.get('contracts'))
+    if data.get('qty_unit') == 'contracts':
+        contracts, qty = qty, None
+    if qty is None and contracts is not None and ct_val is not None and ct_val > 0 and ct_mult > 0:
+        qty = contracts * ct_val * ct_mult
+    return dict(qty=qty if qty is not None and qty > 0 else None, qty_unit='base',
+                ctVal=ct_val if ct_val is not None and ct_val > 0 else None,
+                ctMult=ct_mult if ct_mult > 0 else None)
+
+
+def clean_position(symbol, data, spec=None):
     if not SYMBOL.fullmatch(symbol) or not isinstance(data, dict):
         raise ValueError('无效持仓')
     result = {'symbol': symbol}
     for key in ('side', 'qty', 'entry', 'stop', 'margin', 'liquidation_price', 'leverage', 'take_profit', 'mark_price', 'unrealized_pnl'):
         result[key] = numeric(data.get(key, data.get({'qty': 'quantity', 'liquidation_price': 'liq', 'take_profit': 'target'}.get(key, key))))
+    result.update(quantity_fields(data, spec))
+    result['planned_risk'] = numeric(data.get('planned_risk'))
+    result['notional'] = numeric(data.get('notional'))
+    if result['notional'] is not None and result['notional'] <= 0:
+        result['notional'] = None
     if result['side'] not in (-1, 1) or any(result[k] is None or result[k] <= 0 for k in ('qty', 'entry', 'stop')):
         raise ValueError('持仓数值不完整')
     result['side'] = int(result['side'])
@@ -192,7 +248,7 @@ def clean_position(symbol, data):
     return result
 
 
-def clean_manual_status(raw):
+def clean_manual_status(raw, specs=None):
     """会议手工单只公开展示字段，不复制订单 ID、备注或运行器原因。"""
     rows = raw.values() if isinstance(raw, dict) else raw if isinstance(raw, list) else []
     result = []
@@ -208,12 +264,48 @@ def clean_manual_status(raw):
         for key, alias in (('limit', 'entry'), ('stop', 'stop'), ('take_profit', 'target')):
             value = numeric(order.get(key, order.get('limit_price' if key == 'limit' else alias, order.get(alias))))
             item[key] = value if value is not None and value > 0 else None
+        values = dict(order, **{k: row[k] for k in ('qty', 'quantity', 'contracts', 'qty_unit', 'ctVal', 'ctMult', 'notional', 'planned_risk', 'margin', 'leverage') if k in row})
+        item.update(quantity_fields(values, (specs or {}).get(symbol)))
+        for key in ('planned_risk', 'margin', 'leverage', 'notional'):
+            v = numeric(values.get(key))
+            item[key] = v if v is not None and v >= 0 else None
+        if item['notional'] is None:
+            size = numeric(values.get('size_usdt'))
+            item['notional'] = size if size is not None and size > 0 else None
+        if item['qty'] is None and item['notional'] is not None and item['limit']:
+            item['qty'] = item['notional'] / item['limit']
+        if item['notional'] is None and item['qty'] and item['limit']:
+            item['notional'] = item['qty'] * item['limit']
+        if item['planned_risk'] is None and item['qty'] and item['limit'] and item['stop']:
+            item['planned_risk'] = abs(item['limit'] - item['stop']) * item['qty']
         result.append(item)
     return result
 
 
+def clean_pending_orders(raw, specs=None):
+    rows = raw.items() if isinstance(raw, dict) else enumerate(raw) if isinstance(raw, list) else []
+    result = []
+    for key, row in rows:
+        if not isinstance(row, dict) or row.get('status', 'pending') != 'pending':
+            continue
+        symbol = row.get('symbol', row.get('instId', key))
+        if not isinstance(symbol, str) or not SYMBOL.fullmatch(symbol):
+            continue
+        stamp = iso(row.get('valid_until'))
+        if stamp is None and numeric(row.get('expires_ts')) is not None:
+            try:
+                stamp = datetime.fromtimestamp(float(row['expires_ts'])/1000, timezone.utc).isoformat().replace('+00:00', 'Z')
+            except (ValueError, OverflowError, OSError):
+                pass
+        cleaned = clean_manual_status([dict(row, symbol=symbol, status='pending', valid_until=stamp)], specs)
+        if cleaned:
+            cleaned[0]['strategy'] = row.get('strategy') if row.get('strategy') in ('ema', 'breakout', 'mean_reversion', 'manual') else None
+            result.extend(cleaned)
+    return result
+
+
 def manual_status(directory, state):
-    rows = clean_manual_status(state.get('manual_status'))
+    rows = clean_manual_status(state.get('manual_status'), state.get('market_specs'))
     if rows:
         return rows
     try:
@@ -242,18 +334,29 @@ def clean_trade(data, kind='close'):
 def build_account(root, account_id, name, now=None):
     directory = root / account_id
     state_path = directory / 'state.json'
+    pause = pause_metadata(root) if account_id == 'paper_main' else None
+    cutoff = (pause or {}).get('reset_at')
+    if pause and not state_path.exists():
+        if not pause['reset']: raise ValueError('暂停账户缺少状态')
+        initial = pause['next_initial_equity']
+        if initial <= 0: raise ValueError('初始权益无效')
+        return dict(id=account_id, name=name, status='暂停', balance=initial, marked_equity=initial,
+                    positions=[], trades=[], equity=[], risk=None,
+                    updated_at=cutoff, initial=initial, day=None, day_start=None, manual_status=[], pending_orders=[], pause=pause)
     raw = state_path.read_bytes()
     state = json.loads(raw)
     balance = numeric(state.get('balance'))
     if balance is None or not isinstance(state.get('engines'), dict):
         raise ValueError('模拟盘状态不完整')
-    positions = [clean_position(symbol, engine['position']) for symbol, engine in state['engines'].items() if engine.get('position')]
+    positions = [clean_position(symbol, engine['position'], state.get('market_specs', {}).get(symbol)) for symbol, engine in state['engines'].items() if engine.get('position') and after_reset(engine['position'].get('entry_time'), cutoff)]
     marked_equity = balance
     for position in positions:
         mark = numeric(state.get('prices', {}).get(position['symbol']))
         if mark is None or mark <= 0:
             raise ValueError('持仓标记价格缺失')
         marked_equity += max(-position['margin'], position['side'] * position['qty'] * (mark - position['entry']))
+        if position.get('notional') is None:
+            position['notional'] = position['qty'] * mark
         position['mark_price'] = mark
         position['unrealized_pnl'] = position['side'] * position['qty'] * (mark - position['entry'])
     risk = {key: numeric(state.get(key), default if account_id in dict(ACCOUNTS) else None) for key, default in LEGACY_RISK.items()}
@@ -274,7 +377,7 @@ def build_account(root, account_id, name, now=None):
     risk['legacy_defaults'] = account_id in ARCHIVED_ACCOUNTS and any(numeric(state.get(key)) is None for key in LEGACY_RISK)
     trades = {}
     # state 比 trades.csv 更早原子写入；合并去重，保留已写入 state 的最新平仓。
-    closed = read_csv(directory / 'trades.csv')
+    closed = read_csv(directory / 'trades.csv') if (directory / 'trades.csv').exists() else []
     closed += [dict(t, symbol=s) for s, engine in state['engines'].items() for t in engine.get('trades', [])]
     for row in closed:
         trade = clean_trade(row)
@@ -283,7 +386,8 @@ def build_account(root, account_id, name, now=None):
     updated = None
     lifecycle = None
     # events 只提取开仓成交和 poll 时间；不公开日志文本、异常或任意嵌套字段。
-    with (directory / 'events.jsonl').open(encoding='utf-8') as handle:
+    from contextlib import nullcontext
+    with ((directory / 'events.jsonl').open(encoding='utf-8') if (directory / 'events.jsonl').exists() else nullcontext([])) as handle:
         for line in handle:
             try:
                 event = json.loads(line)
@@ -309,7 +413,7 @@ def build_account(root, account_id, name, now=None):
             source_times.append(datetime.fromisoformat(iso(state[key]).replace('Z', '+00:00')))
     if not source_times:
         source_times.append(datetime.fromtimestamp(state_path.stat().st_mtime, timezone.utc))
-    for row in read_csv(directory / 'equity.csv'):
+    for row in (read_csv(directory / 'equity.csv') if (directory / 'equity.csv').exists() else []):
         timestamp, equity = iso(row.get('timestamp')), numeric(row.get('equity'))
         if timestamp and equity is not None:
             source_times.append(datetime.fromisoformat(timestamp.replace('Z', '+00:00')))
@@ -320,13 +424,14 @@ def build_account(root, account_id, name, now=None):
         raise ValueError('读取期间模拟盘已更新，请重新生成')
     stopped = (account_id in ARCHIVED_ACCOUNTS or (lifecycle is not None and lifecycle[1] == 'stopped')
                or state.get('status') == '已停止' or ((now or datetime.now(timezone.utc)) - max(source_times)).total_seconds() > 7200)
-    return dict(id=account_id, name=name, status='已停止' if stopped else '运行中', balance=balance, marked_equity=marked_equity,
-                positions=positions, trades=sorted(trades.values(), key=lambda t: t['timestamp'], reverse=True),
-                equity=downsample([curve[t] for t in sorted(curve)]), risk=risk,
-                updated_at=updated, initial=numeric(state.get('initial')),
+    return dict(id=account_id, name=name, status='暂停' if pause else '已停止' if stopped else '运行中', balance=balance, marked_equity=marked_equity,
+                positions=positions, trades=sorted((t for t in trades.values() if after_reset(t['timestamp'], cutoff) and after_reset(t['entry_time'], cutoff)), key=lambda t: t['timestamp'], reverse=True),
+                equity=downsample([curve[t] for t in sorted(curve) if after_reset(t, cutoff)]), risk=risk,
+                **(dict(pause=dict(pause, final_equity=marked_equity)) if pause else {}),
+                updated_at=max(filter(None, [updated, cutoff]), default=None), initial=numeric(state.get('initial')),
                 day=state.get('day') if re.fullmatch(r'\d{4}-\d{2}-\d{2}', str(state.get('day', ''))) else None,
                 day_start=numeric(state.get('day_start')),
-                **(dict(manual_status=manual_status(directory, state)) if account_id == 'paper_main' else {}))
+                **(dict(manual_status=manual_status(directory, state), pending_orders=clean_pending_orders(state.get('pending_orders'), state.get('market_specs'))) if account_id == 'paper_main' else {}))
 
 
 def build_snapshot(source_root, now=None):
@@ -354,6 +459,8 @@ def build_decisions(root):
     raw = json.loads(path.read_text(encoding='utf-8'))
     if not isinstance(raw, dict):
         raise ValueError('决议格式无效')
+    if not after_reset(raw.get('updated_at'), reset_cutoff(root)):
+        return dict(status='missing', updated_at=None, meeting=None, version=None, symbols={}, blackout_windows=[], global_size_factor=None)
     symbols = {}
     for symbol, rule in raw.get('symbols', {}).items():
         if not SYMBOL.fullmatch(symbol) or not isinstance(rule, dict):
@@ -394,7 +501,8 @@ def build_public_accounts(root, now=None, legacy=None):
             continue
         account = next((a for a in (legacy or {}).get('accounts', []) if a['id'] == account_id), None)
         account = account or build_account(root, account_id, name, now)
-        raw = json.loads((directory / 'state.json').read_text(encoding='utf-8'))
+        state_path = directory / 'state.json'
+        raw = json.loads(state_path.read_text(encoding='utf-8')) if state_path.exists() else {}
         status = account['status']
         if status == '运行中' and account['day'] == day and account['risk']['blocked']:
             status = '已停手'
@@ -407,21 +515,21 @@ def build_public_accounts(root, now=None, legacy=None):
                 kind=trade['kind'], qty=trade['qty'], price=fill_price, notional=trade['qty'] * fill_price, pnl=trade['pnl']))
         strategies = {}
         for strategy, parameters in raw.get('strategies', {}).items():
-            if strategy in ('ema', 'breakout', 'mean_reversion') and isinstance(parameters, dict):
+            if strategy == 'mean_reversion' and strategy in raw.get('enabled_strategies', raw.get('strategies', {})) and isinstance(parameters, dict):
                 strategies[strategy] = {k: numeric(v) for k, v in parameters.items()
                                         if k in ('fast', 'slow', 'lookback', 'volume', 'rsi', 'trend') and numeric(v) is not None}
         accounts.append(dict(id=account_id, name=name, mode='paper', status=status, equity=account['marked_equity'],
             balance=account['balance'], daily_pnl=(account['marked_equity'] - account['day_start'])
             if account['day'] == day and account['day_start'] is not None else None,
-            daily_loss_limit=account['risk']['daily_loss_limit'], positions=account['positions'], fills=fills,
+            daily_loss_limit=account['risk']['daily_loss_limit'] if account['risk'] else None, positions=account['positions'], fills=fills,
             equity_curve=account['equity'], updated_at=iso(raw.get('updated_at')) or account['updated_at'], initial=account['initial'],
             day=account['day'], day_start=account['day_start'], risk=account['risk'], strategies=strategies,
             enabled_strategies=[s for s in raw.get('enabled_strategies',strategies) if s in strategies],
             entry_mode_by_strategy={s:raw.get('entry_mode_by_strategy',{}).get(s,raw.get('entry_mode','taker'))
                 for s in strategies if raw.get('entry_mode_by_strategy',{}).get(s,raw.get('entry_mode','taker')) in ('maker','taker')},
-            strategy_enabled=status not in ('已停止',), manual_status=account.get('manual_status', [])))
+            strategy_enabled=status not in ('已停止', '暂停'), manual_status=account.get('manual_status', []), pending_orders=account.get('pending_orders', [])))
     return dict(mode='paper', source='本地模拟盘公开快照', updated_at=now.isoformat().replace('+00:00', 'Z'),
-                accounts=accounts, decisions=decisions)
+                accounts=accounts, decisions=decisions, **(dict(pause=pause_metadata(root)) if pause_metadata(root) else {}))
 
 
 def build_scan(root, now=None):
@@ -430,10 +538,13 @@ def build_scan(root, now=None):
     empty=dict(schema_version=1,generated_at=None,source_status='missing',instruments=[],recent_signals=[],positions=[])
     if not path.exists(): return empty
     raw=json.loads(path.read_text(encoding='utf-8'))
+    if not after_reset(raw.get('generated_at'), reset_cutoff(root)): return empty
     if not isinstance(raw,dict) or raw.get('schema_version')!=1 or not iso(raw.get('generated_at')):
         raise ValueError('扫描快照格式无效')
+    state_path=Path(root)/'paper_main'/'state.json'
+    state=json.loads(state_path.read_text(encoding='utf-8')) if state_path.exists() else {}
     rows=[]
-    strategies=('mean_reversion','breakout')
+    strategies=tuple(s for s in ('mean_reversion','manual') if s=='manual' or s in state.get('enabled_strategies', state.get('strategies', raw.get('enabled_strategies', ['mean_reversion']))))
     def symbol(value): return isinstance(value,str) and bool(SYMBOL.fullmatch(value))
     for row in raw.get('instruments',[]):
         if not isinstance(row,dict) or not symbol(row.get('instId')): continue
@@ -447,7 +558,7 @@ def build_scan(root, now=None):
     for row in raw.get('recent_signals',[]):
         stamp=iso(row.get('timestamp'))
         if (not symbol(row.get('instId')) or row.get('strategy') not in strategies or row.get('side') not in (-1,1)
-                or not stamp or not cutoff<=datetime.fromisoformat(stamp.replace('Z','+00:00')).timestamp()<=cutoff+48*3600): continue
+                or not after_reset(stamp, reset_cutoff(root)) or not stamp or not cutoff<=datetime.fromisoformat(stamp.replace('Z','+00:00')).timestamp()<=cutoff+48*3600): continue
         reason=row.get('reason')
         # Failure codes only; arbitrary source text is never published.
         reason=reason if isinstance(reason,str) and re.fullmatch(r'[a-z][a-z0-9_]{0,63}',reason) else None
@@ -455,10 +566,11 @@ def build_scan(root, now=None):
                            opened=row.get('opened') is True,reason=reason))
     positions=[dict(instId=r['instId'],strategy=r.get('strategy') if r.get('strategy') in (*strategies, 'manual') else None,
                     side=r.get('side') if r.get('side') in (-1,1) else None,entry_time=iso(r.get('entry_time')))
-               for r in raw.get('positions',[]) if isinstance(r,dict) and symbol(r.get('instId'))]
+               for r in raw.get('positions',[]) if isinstance(r,dict) and symbol(r.get('instId')) and after_reset(r.get('entry_time'), reset_cutoff(root))]
     return dict(schema_version=1,generated_at=iso(raw['generated_at']),source_status='ok',instruments=rows,
                 recent_signals=sorted(recent,key=lambda r:r['timestamp'],reverse=True),positions=positions,
-                manual_status=clean_manual_status(raw.get('manual_status')))
+                manual_status=manual_status(path.parent, state),
+                pending_orders=clean_pending_orders(state.get('pending_orders', raw.get('pending_orders')), state.get('market_specs')))
 
 
 # Runner events use fixed vocabularies. Alerts have a separate publication filter.
@@ -506,6 +618,7 @@ def clean_event(raw):
 def build_events(source_root, now=None):
     from collections import deque
     events, sources = [], 0
+    cutoff = reset_cutoff(source_root)
     for directory in ('paper_main',):
         try:
             with (Path(source_root) / directory / 'events.jsonl').open(encoding='utf-8') as handle:
@@ -516,7 +629,7 @@ def build_events(source_root, now=None):
             try: raw = json.loads(line)
             except ValueError: continue
             row = clean_event(raw)
-            if row is not None: events.append(row)
+            if row is not None and after_reset(row['ts'], cutoff): events.append(row)
     try:
         with (Path(source_root) / 'alerts.jsonl').open(encoding='utf-8') as handle:
             recent_alerts = deque(handle, maxlen=100)
@@ -527,7 +640,7 @@ def build_events(source_root, now=None):
         try: raw = json.loads(line)
         except ValueError: continue
         row = clean_alert(raw)
-        if row is not None: events.append(row)
+        if row is not None and after_reset(row['ts'], cutoff): events.append(row)
     return dict(schema_version=1, generated_at=(now or datetime.now(timezone.utc)).isoformat(),
                 source_status='ok' if sources else 'missing',
                 events=sorted(events, key=lambda r: r['ts'])[-300:])
@@ -558,16 +671,14 @@ def clean_alert(raw):
     except TeamFieldError: return None
     symbol = raw.get('symbol')
     if isinstance(symbol, str) and re.fullmatch(r'[A-Z0-9]{1,20}', symbol): symbol += '-USDT-SWAP'
-    symbol = symbol if isinstance(symbol, str) and SYMBOL.fullmatch(symbol) else None
-    parts = []
-    for key in ('type', 'value', 'detail'):
-        value = raw.get(key)
-        if type(value) in (int, float): value = str(value) if numeric(value) is not None else None
-        value = public_text(value, 60)
-        if value and not re.search(r'(?:/workspace/|/home/|/private/|https?://|token\s*[:=])', value, re.I):
-            parts.append(' '.join(value.split()))
+    symbol = symbol if isinstance(symbol, str) and SYMBOL.fullmatch(symbol) and not sensitive(symbol) else None
+    labels = {'breakout':'价格突破','volume':'成交量','volume_spike':'放量','funding':'资金费率',
+              'oi':'持仓量','price_change':'价格波动','oi_change':'持仓量变化','放量':'放量'}
+    label = labels.get(raw.get('type'), '市场异动') if isinstance(raw.get('type'), str) else '市场异动'
+    value = numeric(raw.get('value'))
+    parts = [label] + ([str(value)] if value is not None else [])
     result = dict(ts=stamp, type='异动', coin=symbol, strategy=None, direction=None, price=None,
-                  reason=' · '.join(parts)[:80] or '市场异动')
+                  reason=' · '.join(parts)[:80] or '市场异动', wake=raw.get('wake') is True)
     url = public_https_url(raw.get('source_url'))
     if url: result['source_url'] = url
     return result
@@ -584,89 +695,49 @@ def write_snapshot(snapshot, output):
         temporary.unlink(missing_ok=True)
 
 
-# 固定白名单，避免将任意研究文件内容复制到公开面板。
-BT60_NUMERIC = ('trades', 'win_rate_pct', 'payoff_ratio', 'profit_factor', 'return_pct',
-    'max_drawdown_pct', 'fees', 'slippage', 'funding', 'gross_pnl', 'total_cost',
-    'gross_winning_pnl', 'isolated_insurance_credit', 'cost_over_gross_winning_pct',
-    'cost_over_abs_gross_pct', 'cost_over_initial_pct', 'liquidations', 'daily_halt_days',
-    'average_daily_candidates', 'final_equity', 'realized_losses_over_3pct',
-    'max_trade_loss_pct_of_entry_equity', 'reconciliation_error')
-BT60_STRATEGIES = {'ema': 'EMA 趋势', 'breakout': '突破放量', 'mean_reversion': '均值回归'}
-BT60_PARAMETERS = {'fast', 'slow', 'lookback', 'volume', 'rsi', 'trend'}
-
-
-def build_bt60(results_root):
-    root = Path(results_root)
-    def clean(row):
-        code, timeframe, segment = (row.get(k) for k in ('strategy_code', 'timeframe', 'segment'))
-        if code not in BT60_STRATEGIES or timeframe not in ('15m', '1H', '4H') or segment not in ('选参段', '样本内', '样本外', '全60天'):
-            raise ValueError('回测分类不完整')
-        parameters = json.loads(row.get('parameters') or '{}')
-        if not isinstance(parameters, dict):
-            raise ValueError('回测参数格式错误')
-        return dict(strategy=BT60_STRATEGIES[code], strategy_code=code, timeframe=timeframe, segment=segment,
-                    parameters={k: numeric(v) for k, v in parameters.items() if k in BT60_PARAMETERS},
-                    **{k: numeric(row.get(k)) for k in BT60_NUMERIC})
-    rows = [clean(r) for r in read_csv(root / 'bt60_summary.csv')]
-    qualified = [clean(r) for r in read_csv(root / 'bt60_qualified.csv')]
-    if not rows:
-        raise ValueError('回测汇总为空')
-    key = lambda r: (r['strategy_code'], r['timeframe'], r['segment'])
-    qualified_keys = {key(r) for r in qualified}
-    summary_by_key = {key(r): r for r in rows}
-    if len(summary_by_key) != len(rows) or any(summary_by_key.get(key(q)) != q for q in qualified):
-        raise ValueError('合格组合与汇总不一致')
-    for row in rows:
-        row['qualified'] = key(row) in qualified_keys
-        row['qualified_combination'] = any(row['strategy_code'] == q['strategy_code'] and row['timeframe'] == q['timeframe'] for q in qualified)
-    report = (root / 'bt60_summary.md').read_text(encoding='utf-8')
-    generated = re.search(r'生成时间[：:]\s*([0-9T:.+Z-]+)', report)
-    periods = re.findall(r'\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}),\s*(\d{4}-\d{2}-\d{2} \d{2}:\d{2})\)', report)
-    # 区间只取报告开头的整体与样本外区间，不复制正文或路径。
-    return dict(schema_version=1, generated_at=iso(generated[1].rstrip('.')) if generated else None,
-                period={'start': iso(periods[0][0]), 'end': iso(periods[0][1]), 'timezone': 'UTC'} if periods else None,
-                out_of_sample={'start': iso(periods[1][0]), 'end': iso(periods[1][1]), 'timezone': 'UTC'} if len(periods) > 1 else None,
-                note='价差条件无历史数据，未用于回测', rows=rows, qualified=qualified,
-                sources=['bt60_summary.csv', 'bt60_qualified.csv', 'bt60_summary.md'])
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source-root', type=Path, default=Path('/workspace/crypto-bot'))
     parser.add_argument('--output', type=Path, default=Path(__file__).resolve().parent.parent / 'paper/snapshot.json')
-    parser.add_argument('--results-root', type=Path, help='回测 CSV 所在目录，默认 source-root/results')
-    parser.add_argument('--bt60-output', type=Path, help='默认在快照输出旁生成 bt60.json')
-    parser.add_argument('--bt60-only', action='store_true', help='只更新回测公开数据')
+    parser.add_argument('--account-source-root', type=Path, help='可选只读账户归档根目录；决议/异动仍读取 source-root')
+    parser.add_argument('--historical', action='store_true', help='只读归档：标记主力盘已停止，禁止把归档显示为运行中')
     parser.add_argument('--account-output', type=Path, help='统一账户快照，默认 account.json')
     parser.add_argument('--team-only', action='store_true', help='只更新团队公开数据')
     parser.add_argument('--team-root', type=Path, help='团队源目录，默认 source-root/team')
     parser.add_argument('--team-output', type=Path, help='默认在快照输出旁生成 team.json')
     args = parser.parse_args()
     try:
-        team = build_team(args.team_root or args.source_root / 'team')
+        team = filter_team_reset(build_team(args.team_root or args.source_root / 'team'), reset_cutoff(args.source_root))
         if args.team_only:
             write_snapshot(team, args.team_output or args.output.with_name('team.json'))
             print('已生成团队公开数据。')
             return
-        bt60 = build_bt60(args.results_root or args.source_root / 'results')
-        snapshot = None if args.bt60_only else (build_snapshot(args.source_root) if any(args.source_root.glob('paper_*')) else dict(schema_version=1, generated_at=datetime.now(timezone.utc).isoformat(), accounts=[]))
+        account_root = args.source_root if reset_cutoff(args.source_root) else args.account_source_root or args.source_root
+        snapshot = dict(schema_version=1, generated_at=datetime.now(timezone.utc).isoformat(),
+                        accounts=[build_account(account_root, 'paper_main', '主力盘')] if (account_root / 'paper_main').exists() else [])
         if snapshot is not None:
-            scan = build_scan(args.source_root)
-            public = build_public_accounts(args.source_root, legacy=snapshot)
+            if args.historical and not pause_metadata(args.source_root):
+                for account in snapshot['accounts']:
+                    account['status'] = '已停止'
+            scan = build_scan(account_root)
+            public = build_public_accounts(account_root, legacy=snapshot)
+            public['decisions'] = build_decisions(args.source_root)
             from validate_account import validate_account
             validate_account(public)
+            from history_snapshot import build_history
+            history = build_history(account_root, context_root=args.source_root)
+            history['historical'] = args.historical and not bool(pause_metadata(args.source_root))
+            write_snapshot(history, args.output.with_name('history.json'))
             write_snapshot(snapshot, args.output)
             write_snapshot(public, args.account_output or args.output.with_name('account.json'))
             write_snapshot(public['decisions'], args.output.with_name('decisions.json'))
             write_snapshot(scan, args.output.with_name('scan.json'))
             write_snapshot(build_events(args.source_root), args.output.with_name('events.json'))
-        write_snapshot(bt60, args.bt60_output or args.output.with_name('bt60.json'))
-        if not args.bt60_only:
-            write_snapshot(team, args.team_output or args.output.with_name('team.json'))
+        write_snapshot(team, args.team_output or args.output.with_name('team.json'))
     except (OSError, ValueError, KeyError, TypeError) as exc:
         # 控制台也不复制可能包含任意原始内容的解析异常。
-        parser.exit(1, f'快照未更新：读取或校验失败（{type(exc).__name__}），请检查模拟盘与回测源文件后重试。\n')
-    print('已生成公开快照、团队与 BT60 回测数据。')
+        parser.exit(1, f'快照未更新：读取或校验失败（{type(exc).__name__}），请检查主力盘源文件后重试。\n')
+    print('已生成公开快照、团队与账户历史数据。')
 
 
 if __name__ == '__main__':

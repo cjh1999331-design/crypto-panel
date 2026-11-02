@@ -1,3 +1,4 @@
+import { positionAmounts, baseQuantity } from './portfolio.mjs';
 // Public snapshot contract. This module never calls an exchange or private endpoint.
 const finite = n => typeof n === 'number' && Number.isFinite(n);
 export const mainAccounts = data => (data?.accounts || []).filter(a => a.id === (data?.mode === 'live' ? 'live_main' : 'paper_main'));
@@ -5,6 +6,10 @@ export function validManualStatus(rows) {
   return rows === undefined || Array.isArray(rows) && rows.every(r => r && typeof r === 'object' &&
     (r.symbol == null || /^[A-Z0-9]+-USDT-SWAP$/.test(r.symbol)) && (r.side == null || [1,-1].includes(r.side)) &&
     ['pending','filled','expired','rejected','cancelled'].includes(r.status) &&
+    ['qty','planned_risk','notional','margin','leverage'].every(k=>r[k]==null || finite(r[k]) && r[k]>=0) &&
+    ['ctVal','ctMult'].every(k=>r[k]==null || finite(r[k]) && r[k]>0) &&
+    (r.qty_unit==null || ['base','contracts'].includes(r.qty_unit)) &&
+    (r.qty_unit!=='contracts' || finite(r.ctVal) && r.ctVal>0) &&
     ['limit','stop','take_profit'].every(k => r[k] == null || finite(r[k]) && r[k] > 0) &&
     (r.valid_until == null || Number.isFinite(Date.parse(r.valid_until))));
 }
@@ -24,20 +29,20 @@ export function validAccount(data) {
   if (data.accounts.some(a=>!object(a)) || new Set(data.accounts.map(a=>a.id)).size !== data.accounts.length) return false;
   const accountsValid=data.accounts.every(a => {
     if (!new RegExp(`^${data.mode}_[a-z0-9_]+$`).test(a.id) || a.mode !== data.mode ||
-        !['未启动','运行中','已停止','已停手','事件窗口禁开新仓'].includes(a.status) ||
+        !['未启动','运行中','暂停','已停止','已停手','事件窗口禁开新仓'].includes(a.status) ||
         !['balance','equity','daily_pnl','daily_loss_limit'].every(k=>nullable(a[k]))) return false;
     if (!Array.isArray(a.positions) || !Array.isArray(a.fills) || !Array.isArray(a.equity_curve)) return false;
     if (a.status === '未启动') {
       if (['balance','equity','daily_pnl','daily_loss_limit'].some(k=>a[k] !== null) || a.positions.length || a.fills.length || a.equity_curve.length) return false;
-    } else if (!finite(a.balance) || !finite(a.equity) || !finite(a.daily_loss_limit) || a.daily_loss_limit <= 0 || a.daily_loss_limit > 1) return false;
+    } else if (!finite(a.balance) || !finite(a.equity) || !(a.status==='暂停' && data.pause?.reset && a.daily_loss_limit===null) && (!finite(a.daily_loss_limit) || a.daily_loss_limit <= 0 || a.daily_loss_limit > 1)) return false;
     if (a.risk != null && !object(a.risk)) return false;
     if (a.risk?.leverage_tiers != null && (!object(a.risk.leverage_tiers) || !['turnover_gte_50000000','turnover_lt_50000000','threshold_usdt'].every(k=>finite(a.risk.leverage_tiers[k]) && a.risk.leverage_tiers[k]>0))) return false;
     if (a.strategies != null && (!object(a.strategies) || !Object.values(a.strategies).every(p=>object(p) && Object.values(p).every(finite)))) return false;
     const strategyNames = ['ema','breakout','mean_reversion'];
     if (a.enabled_strategies != null && (!Array.isArray(a.enabled_strategies) || new Set(a.enabled_strategies).size !== a.enabled_strategies.length || !a.enabled_strategies.every(s=>strategyNames.includes(s)))) return false;
     if (a.entry_mode_by_strategy != null && (!object(a.entry_mode_by_strategy) || !Object.entries(a.entry_mode_by_strategy).every(([s,m])=>strategyNames.includes(s) && ['maker','taker'].includes(m)))) return false;
-    if (!validManualStatus(a.manual_status)) return false;
-    return a.positions.every(p=>object(p) && symbol(p.symbol) && [-1,1].includes(p.side) && finite(p.qty) && p.qty>0 && finite(p.entry) && p.entry>0 && ['stop','leverage','take_profit','mark_price','unrealized_pnl'].every(k=>nullable(p[k]))) &&
+    if (!validManualStatus(a.manual_status) || !validManualStatus(a.pending_orders)) return false;
+    return a.positions.every(p=>object(p) && symbol(p.symbol) && [-1,1].includes(p.side) && finite(p.qty) && p.qty>0 && finite(p.entry) && p.entry>0 && ['stop','leverage','take_profit','mark_price','unrealized_pnl'].every(k=>nullable(p[k])) && ['notional','ctVal','ctMult','margin'].every(k=>p[k]==null || finite(p[k]) && p[k]>=0) && (p.qty_unit==null || ['base','contracts'].includes(p.qty_unit)) && (p.qty_unit!=='contracts' || finite(p.ctVal) && p.ctVal>0)) &&
       a.fills.every(f=>object(f) && symbol(f.symbol) && timestamp(f.timestamp) && ['open','close'].includes(f.kind) && finite(f.qty) && f.qty>0 && finite(f.price) && f.price>0 && finite(f.notional) && nullable(f.pnl) && Math.abs(f.notional-f.qty*f.price)<=Math.max(1,f.notional)*1e-8) &&
       a.equity_curve.every(p=>object(p) && finite(p.equity) && timestamp(p.timestamp));
   });
@@ -50,6 +55,7 @@ export function activeWindows(decisions, now = Date.now(), symbol = null) {
   return (decisions?.blackout_windows || []).filter(w => Date.parse(w.start) <= now && now < Date.parse(w.end) && (!symbol || w.symbols.includes('*') || w.symbols.includes(symbol)));
 }
 export function strategyState(account, decisions, now = Date.now()) {
+  if (account.status === '暂停') return '暂停';
   if (account.status === '未启动') return '未启动';
   if (account.status === '已停止' || account.strategy_enabled === false) return '已停止';
   const today = account.day === localDay(now);
@@ -64,7 +70,7 @@ export function summarizeAccounts(data, tickers = [], now = Date.now()) {
   if (!started.length) return null;
   const accounts = started.map(a=>{
     const live = a.status !== '已停止' && a.positions.every(p=>finite(prices.get(p.symbol)));
-    const equity = live ? a.balance + a.positions.reduce((sum,p)=>sum+Math.max(finite(p.margin)?-p.margin:-Infinity,p.side*p.qty*(prices.get(p.symbol)-p.entry)),0) : a.equity;
+    const equity = live ? a.balance + a.positions.reduce((sum,p)=>sum+Math.max(finite(p.margin)?-p.margin:-Infinity,p.side*baseQuantity(p)*(prices.get(p.symbol)-p.entry)),0) : a.equity;
     const isToday = a.day ? a.day === localDay(now) : localDay(Date.parse(a.updated_at || data.updated_at)) === localDay(now);
     const daily = isToday ? finite(a.day_start) ? equity-a.day_start : a.daily_pnl : null;
     const baseline = finite(a.day_start) ? a.day_start : finite(daily) ? equity-daily : null;
@@ -76,8 +82,7 @@ export function summarizeAccounts(data, tickers = [], now = Date.now()) {
   const positions = started.flatMap(a=>a.positions.map(p=>{
     const mark = a.status !== '已停止' && finite(prices.get(p.symbol)) ? prices.get(p.symbol) : p.mark_price;
     return {...p, account:a.name || (data.mode === 'live' ? '实盘策略' : '模拟策略'), mark,
-      pnl:finite(mark) ? p.side*p.qty*(mark-p.entry) : p.unrealized_pnl,
-      notional:finite(mark) ? Math.abs(p.qty*mark) : null};
+      ...positionAmounts(p,mark)};
   }));
   const equity=accounts.reduce((s,a)=>s+a.equity,0);
   const initial=started.every(a=>finite(a.initial)) ? started.reduce((s,a)=>s+a.initial,0) : null;
@@ -106,7 +111,8 @@ export function aggregateCurve(accounts) {
 // Isolated insurance caps each position's loss at its own posted margin.
 export function isolatedPnL(p, mark) {
   if (!finite(mark) || mark<=0) return null;
-  const raw=p.side*p.qty*(mark-p.entry);
+  const qty=baseQuantity(p);if(qty===null)return null;
+  const raw=p.side*qty*(mark-p.entry);
   return finite(p.margin) && p.margin>=0 ? Math.max(-p.margin,raw) : raw;
 }
 export function liveBalance(data, quotes=new Map(), now=Date.now(), quoteMaxAge=45000) {

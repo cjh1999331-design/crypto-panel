@@ -1,15 +1,15 @@
 import { ema, rsi, macd } from './indicators.mjs';
-export const COLORS = ['#22d3ee', '#79bfff', '#ffce70', '#c995ff', '#70e3be', '#ff9d63', '#e788ca', '#b5c7cf'];
-const up = '#34d399', down = '#fb7185';
+export const COLORS = ['#06727d', '#345db5', '#916000', '#7654b3', '#087c50', '#a44a16', '#a43276', '#526273'];
+const up = '#087c50', down = '#c53045';
 const formatter = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Bangkok', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 export function chartAvailable() { return Boolean(globalThis.LightweightCharts); }
 function makeChart(element) {
   const chart = LightweightCharts.createChart(element, {
     width: element.clientWidth, height: element.clientHeight,
-    layout: { background: { color: '#10172c' }, textColor: '#96a7c4', fontSize: 10, fontFamily: 'JetBrains Mono, monospace' },
-    grid: { vertLines: { color: '#ffffff08' }, horzLines: { color: '#ffffff08' } },
-    rightPriceScale: { borderColor: '#ffffff15', minimumWidth: 78 },
-    timeScale: { borderColor: '#ffffff15', timeVisible: true, secondsVisible: false, rightOffset: 3,
+    layout: { background: { color: '#ffffff' }, textColor: '#4b5563', fontSize: 10, fontFamily: 'JetBrains Mono, monospace' },
+    grid: { vertLines: { color: '#edf0f3' }, horzLines: { color: '#edf0f3' } },
+    rightPriceScale: { borderColor: '#d1d5db', minimumWidth: 78 },
+    timeScale: { borderColor: '#d1d5db', timeVisible: true, secondsVisible: false, rightOffset: 3,
       tickMarkFormatter: time => formatter.format(new Date(Number(time) * 1000)) },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
     localization: { locale: 'zh-CN', timeFormatter: time => formatter.format(new Date(Number(time) * 1000)) },
@@ -27,13 +27,19 @@ export function createCandleCharts() {
   const groups = ['price', 'volume', 'rsi', 'macd'].map(name => makeChart(document.getElementById(`${name}-chart`)));
   const [price, volume, strength, convergence] = groups.map(g => g.chart);
   const candles = price.addCandlestickSeries({ upColor: up, downColor: down, borderVisible: false, wickUpColor: up, wickDownColor: down, priceLineVisible: false });
-  const averages = [line(price, up, 'EMA20'), line(price, '#edc879', 'EMA50'), line(price, '#ba9aff', 'EMA200')];
+  const averages = [line(price, up, 'EMA20'), line(price, '#916000', 'EMA50'), line(price, '#7654b3', 'EMA200')];
   const vol = volume.addHistogramSeries({ priceFormat: { type: 'volume' }, priceLineVisible: false, lastValueVisible: false });
-  const rs = line(strength, '#ba9aff', 'RSI14');
+  const rs = line(strength, '#7654b3', 'RSI14');
   for (const value of [30, 70]) rs.createPriceLine({ price: value, color: '#536176', lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: '' });
-  const dif = line(convergence, '#80aaff', 'DIF'), dea = line(convergence, '#edc879', 'DEA');
+  const dif = line(convergence, '#345db5', 'DIF'), dea = line(convergence, '#916000', 'DEA');
   const hist = convergence.addHistogramSeries({ priceLineVisible: false, lastValueVisible: false, priceFormat: { type: 'price', precision: 6, minMove: .000001 } });
-  let syncing = false, initialized = false;
+  let syncing = false, initialized = false, priceLines = [];
+  let overlays=[];
+  candles.applyOptions({autoscaleInfoProvider: original => {
+    const info=original(); if(!info)return info;
+    for(const row of overlays){info.priceRange.minValue=Math.min(info.priceRange.minValue,row.price);info.priceRange.maxValue=Math.max(info.priceRange.maxValue,row.price);}
+    return info;
+  }});
   const subscriptions = groups.map(({ chart }) => {
     const handler = range => {
       if (!range || syncing) return;
@@ -62,6 +68,10 @@ export function createCandleCharts() {
       initialized = true;
     },
     markers(rows) { candles.setMarkers(rows); },
+    levels(rows) {
+      priceLines.forEach(p=>candles.removePriceLine(p));overlays=rows;
+      priceLines=rows.map(row=>candles.createPriceLine({...row,lineWidth:1,lineStyle:2,axisLabelVisible:true}));
+    },
     reset() { price.timeScale().fitContent(); },
     destroy() { groups.forEach((g, i) => { g.chart.timeScale().unsubscribeVisibleLogicalRangeChange(subscriptions[i]); g.destroy(); }); },
   };
@@ -80,7 +90,7 @@ export function createEquityChart(accounts) {
 // The home balance curve contains only the current public snapshot's accounts.
 export function createBalanceChart(points) {
   const group=makeChart(document.getElementById('equity-chart'));
-  const series=group.chart.addAreaSeries({topColor:'#22d3ee48',bottomColor:'#22d3ee02',lineColor:'#22d3ee',lineWidth:2,priceLineVisible:false,lastValueVisible:false});
+  const series=group.chart.addAreaSeries({topColor:'#06727d48',bottomColor:'#06727d02',lineColor:'#06727d',lineWidth:2,priceLineVisible:false,lastValueVisible:false});
   series.setData(points);
   group.chart.timeScale().fitContent();
   return group;

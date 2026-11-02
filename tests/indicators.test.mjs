@@ -38,31 +38,23 @@ function fixture() {
   return bars;
 }
 
-test('六条件：逐项实际值、排除未收盘和信号本身、前 20/50 支撑阻力', () => {
-  const bars = fixture(), result = analyze(bars);
-  assert.equal(result.ready, true);
-  assert.equal(result.checks[0].pass, true); assert.equal(result.levels.high20, 106);
-  assert.equal(result.checks[1].pass, true); near(result.checks[1].ratio, 1.5);
-  near(result.checks[2].location, 3 / 3.5); assert.equal(result.checks[2].pass, true);
-  assert.equal(result.checks[3].pass, true);
-  assert.equal(result.checks[4].pass, result.checks[4].rsi > 50 && result.checks[4].rsi < 70);
-  assert.equal(result.checks[5].pass, true);
-  assert.equal(result.count, result.checks.filter(c => c.pass).length);
-  const pending = { ...bars.at(-1), time: bars.at(-1).time + 3600, close: 1000, high: 1001, turnover: 1e9, confirm: '0' };
-  assert.deepEqual(analyze([...bars, pending]), result);
-  const changed = bars.map(b => ({ ...b })); changed.at(-1).close = 106; changed.at(-1).turnover = 1499;
-  const failed = analyze(changed);
-  assert.equal(failed.checks[0].pass, false); assert.equal(failed.checks[1].pass, false); assert.equal(failed.checks[2].pass, false);
-  assert.equal(result.levels.high50, 106); assert.equal(result.levels.low50, 99);
+test('均值回归：取启用配置、连续201根、已收盘、逐项阈值与支撑阻力',()=>{
+ const bars=fixture(),params={rsi:25,trend:.02},result=analyze(bars,params);
+ assert.equal(result.ready,true);assert.equal(result.checks.length,7);
+ assert.match(result.checks[1].detail,/2.00%/);assert.match(result.checks[5].detail,/25.*75/);
+ assert.equal(result.levels.high20,106);assert.equal(result.levels.low50,99);
+ assert.deepEqual(analyze([...bars,{...bars.at(-1),time:bars.at(-1).time+3600,close:9999,confirm:'0'}],params),result);
+ assert.equal(analyze(bars.slice(0,200),params).ready,false);
+ assert.equal(analyze(bars).ready,false);
+ const gap=bars.map(b=>({...b}));gap.at(-5).time+=1;
+ assert.equal(analyze(gap,params).ready,false);
+ assert.equal(analyze(bars,{rsi:10,trend:0}).checks[1].pass,false);
 });
-
-test('六条件：零波幅与零成交均值不产生无穷比值，样本不足不报信号', () => {
-  const bars = fixture().map(b => ({ ...b, open: 1, close: 1, high: 1, low: 1, turnover: 0 }));
-  const a = analyze(bars);
-  assert.equal(a.checks[1].ratio, null); assert.equal(a.checks[1].pass, false);
-  assert.equal(a.checks[2].location, null); assert.equal(a.checks[2].pass, false);
-  assert.equal(a.checks[3].pass, false); assert.equal(a.checks[4].pass, false); assert.equal(a.checks[5].pass, false);
-  assert.equal(analyze(bars.slice(0, 50)).ready, false);
+test('均值回归：零成交额与零ATR不产生无穷值',()=>{
+ const bars=fixture().map(b=>({...b,open:1,close:1,high:1,low:1,turnover:0}));
+ const a=analyze(bars,{rsi:25,trend:.02});assert.equal(a.side,0);
+ assert.equal(a.checks[3].pass,false);assert.equal(a.checks[4].pass,false);
+ assert.doesNotMatch(JSON.stringify(a),/Infinity|NaN/);
 });
 
 test('K 线解析：倒序转正序、去重、USDT 成交额字段与 confirm', () => {

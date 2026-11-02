@@ -8,7 +8,8 @@ function run(){
  const base=fixture.team,now=Date.parse(base.generated_at);
  const render=status=>{
   const data=structuredClone(base);for(const r of Object.values(data.status.roles))r.status=status;
-  document.querySelector('#role-cards').innerHTML=teamCards(data,{}, {now,reduced:reducedMotion(),hidden:document.hidden});
+  const snapshotAt=new Date(now-(status==='离线'?16*60000:0)).toISOString();
+  document.querySelector('#role-cards').innerHTML=teamCards(data,{}, {now,snapshotAt,reduced:reducedMotion(),hidden:document.hidden});
  };
  document.documentElement.classList.add('has-live-state');
  fixture.scenes.forEach((scene,i)=>{

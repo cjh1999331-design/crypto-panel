@@ -55,26 +55,39 @@ export function parseCandles(rows) {
   return [...byTime.values()].sort((a, b) => a.time - b.time);
 }
 
-export function analyze(candles) {
-  const bars = candles.filter(b => b.confirm === '1');
-  const closes = bars.map(b => b.close);
-  const e20 = ema(closes, 20), e50 = ema(closes, 50), e200 = ema(closes, 200);
-  const rs = rsi(closes), mc = macd(closes);
-  const i = bars.length - 1, bar = bars[i];
-  if (bars.length < 51) return { ready: false, count: null, bars, e20, e50, e200, rsi: rs, macd: mc };
-  const prev20 = bars.slice(i - 20, i), prev50 = bars.slice(i - 50, i);
-  const high20 = Math.max(...prev20.map(b => b.high)), low20 = Math.min(...prev20.map(b => b.low));
-  const high50 = Math.max(...prev50.map(b => b.high)), low50 = Math.min(...prev50.map(b => b.low));
-  const average = prev20.reduce((sum, b) => sum + b.turnover, 0) / 20;
-  const ratio = average > 0 ? bar.turnover / average : null;
-  const location = bar.high > bar.low ? (bar.close - bar.low) / (bar.high - bar.low) : null;
-  const checks = [
-    { pass: bar.close > high20, close: bar.close, high20 },
-    { pass: ratio !== null && ratio >= 1.5, turnover: bar.turnover, average, ratio },
-    { pass: location !== null && location >= .7, location },
-    { pass: e20[i] > e50[i] && bar.close > e20[i], close: bar.close, ema20: e20[i], ema50: e50[i] },
-    { pass: rs[i] > 50 && rs[i] < 70, rsi: rs[i] },
-    { pass: mc.histogram[i] > 0 && mc.histogram[i] > mc.histogram[i - 1], histogram: mc.histogram[i], previous: mc.histogram[i - 1] },
+// Entry checks mirror bt60.engine.make_signal; EWM uses adjust=False.
+function ewm(values,alpha){let prev=null;return values.map(v=>{if(!Number.isFinite(v))return null;prev=prev===null?v:alpha*v+(1-alpha)*prev;return prev;});}
+export function analyze(candles,parameters=null) {
+  const bars=candles.filter(b=>b.confirm==='1'),i=bars.length-1,bar=bars[i],closes=bars.map(b=>b.close);
+  const e50=ewm(closes,2/51),e200=ewm(closes,2/201);
+  const tr=bars.map((b,j)=>Math.max(b.high-b.low,j?Math.abs(b.high-closes[j-1]):0,j?Math.abs(b.low-closes[j-1]):0));
+  const atr=ewm(tr,1/14);
+  const gains=ewm(closes.map((c,j)=>j?Math.max(0,c-closes[j-1]):null),1/14),losses=ewm(closes.map((c,j)=>j?Math.max(0,closes[j-1]-c):null),1/14);
+  const rs=closes.map((c,j)=>j>=14 && losses[j]>0?100-100/(1+gains[j]/losses[j]):null);
+  const band=j=>{const list=closes.slice(j-19,j+1);if(list.length<20)return null;const mid=list.reduce((n,v)=>n+v,0)/20,sd=Math.sqrt(list.reduce((n,v)=>n+(v-mid)**2,0)/20);return {low:mid-2*sd,high:mid+2*sd};};
+  const previous=band(i-1),current=band(i);
+  const contiguous=bars.length>=201 && bars.slice(-200).every((b,j)=>b.time-bars[bars.length-201+j].time===3600);
+  const configured=parameters && Number.isFinite(parameters.rsi) && Number.isFinite(parameters.trend);
+  const ready=Boolean(contiguous && configured);
+  const deviation=i>=0?Math.abs(e50[i]/e200[i]-1):null,slope=i>=5 && atr[i]>0?Math.abs(e50[i]-e50[i-5])/atr[i]:null;
+  const volatility=i>=13 && bar?atr[i]/bar.close:null;
+  const average=i>=20?bars.slice(i-20,i).reduce((n,b)=>n+b.turnover,0)/20:null;
+  const volume=average>0?bar.turnover/average:null;
+  const longRsi=configured && Number.isFinite(rs[i-1]) && rs[i-1]<parameters.rsi;
+  const shortRsi=configured && Number.isFinite(rs[i-1]) && rs[i-1]>100-parameters.rsi;
+  const longBand=Boolean(previous && current && closes[i-1]<previous.low && bar.close>=current.low);
+  const shortBand=Boolean(previous && current && closes[i-1]>previous.high && bar.close<=current.high);
+  const f=(v,d=2)=>Number.isFinite(v)?v.toFixed(d):'—';
+  const checks=[
+    {label:'启用配置 / 连续 1H 已收盘样本',pass:ready,detail:`${configured?'均值回归已启用':'等待主力盘启用配置'}；${bars.length} 根，需最近 201 根连续 1H`},
+    {label:'趋势偏离度 |EMA50 / EMA200 − 1|',pass:configured && deviation!==null && deviation<parameters.trend,detail:`当前 ${f(deviation===null?null:deviation*100)}%；阈值 < ${f(configured?parameters.trend*100:null)}%`},
+    {label:'EMA50 五根斜率 / ATR14',pass:slope!==null && slope<.8,detail:`当前 ${f(slope,3)}；阈值 < 0.80`},
+    {label:'ATR14 / 收盘价',pass:volatility!==null && volatility>=.002 && volatility<=.035,detail:`当前 ${f(volatility===null?null:volatility*100,3)}%；范围 0.20%–3.50%`},
+    {label:'成交额 / 前 20 根均值',pass:volume!==null && volume>=.8,detail:`当前 ${f(volume)}×；阈值 ≥ 0.80×`},
+    {label:'前一根 RSI14',pass:longRsi || shortRsi,detail:`当前 ${f(rs[i-1])}；多 < ${f(configured?parameters.rsi:null,0)} ${longRsi?'满足':'未满足'} / 空 > ${f(configured?100-parameters.rsi:null,0)} ${shortRsi?'满足':'未满足'}`},
+    {label:'布林带回归（20 根 / 2σ）',pass:longRsi&&longBand || shortRsi&&shortBand,detail:`多：前收盘 ${f(closes[i-1],4)} < 前下轨 ${f(previous?.low,4)}，现收盘 ${f(bar?.close,4)} ≥ 下轨 ${f(current?.low,4)} ${longBand?'满足':'未满足'}；空：前收盘 > 前上轨 ${f(previous?.high,4)} 且现收盘 ≤ 上轨 ${f(current?.high,4)} ${shortBand?'满足':'未满足'}`},
   ];
-  return { ready: true, bars, bar, e20, e50, e200, rsi: rs, macd: mc, checks, count: checks.filter(c => c.pass).length, levels: { high20, low20, high50, low50 } };
+  const common=checks.slice(0,5).every(c=>c.pass);
+  const levels=i>=50?Object.fromEntries([20,50].flatMap(n=>[['high'+n,Math.max(...bars.slice(i-n,i).map(b=>b.high))],['low'+n,Math.min(...bars.slice(i-n,i).map(b=>b.low))]])):null;
+  return {ready,bars,bar,checks,count:checks.filter(c=>c.pass).length,side:common && longRsi && longBand?1:common && shortRsi && shortBand?-1:0,levels,e20:ema(closes,20),e50:ema(closes,50),e200:ema(closes,200),rsi:rs};
 }

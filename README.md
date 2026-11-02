@@ -1,8 +1,8 @@
 # MODI · AI 交易团队
 
-手机优先的中文交易看板 v2。深蓝到深紫背景、发光毛玻璃卡片、六个自绘圆润 SVG 机器人，青 / 紫 / 品红强调色。行情直接读取 OKX 公共接口，交易数据只读取经过白名单清洗的同源 JSON。没有密钥、登录、账户号码或私有交易接口。
+手机优先的中文只读看板。首页聚焦主力盘权益、持仓、K 线与风控；团队工作台和时间线折叠展示。只统计 `paper_main`，会议单与均值回归之外的旧策略内容不进入主页面。`#/paper` 是账户历史，`#/market` 保留独立行情页，`#/coin/<symbol>` 是单币研究。
 
-## 运行
+## 运行与快照
 
 ```bash
 cd /workspace/crypto-panel
@@ -11,157 +11,100 @@ python3 tools/validate_account.py paper/account.json
 python3 -m http.server 8008 --bind 127.0.0.1
 ```
 
-打开 <http://127.0.0.1:8008/>。`config.js` 配置会议标的回退值 `symbol` 和 `startDate`，默认 `2026-11-02`。DAY 1 从该日期 UTC+7 零点开始，之后按 UTC+7 日界递增，实时时钟也使用 UTC+7。
+默认只读 `/workspace/crypto-bot/paper_main/{state.json,trades.csv,equity.csv,events.jsonl,scan.json}`，以及 `/workspace/crypto-bot/{decisions.json,alerts.jsonl,team/}`。不导入、启动或修改交易程序。主力盘必要文件缺失或校验失败时拒绝发布，保留上次快照；不会补造余额、成交或权益点。
 
-首页顺序：
-
-1. 六张团队卡：主席青、技术蓝、行业绿、新闻琥珀、风控红、操盘品红。手机两列；直接显示任务、报告摘要、时间和评级。
-2. 交易视野：持仓币或信号币的 1H/4H K 线、EMA20/50/200、真实开平仓标记、实时 / 轮询 / 离线状态。默认最新持仓币，空仓时显示今日会议标的。
-3. BALANCE 主力盘余额、模式标签和主力盘权益面积图。
-4. 当前持仓、今日成交 / 成交额 / 持仓名义金额、最近成交、主力盘的日亏进度与只读开关状态。
-5. 全市场扫描：全部主力币池、排序、信号/持仓筛选、48小时最近信号与当前持仓币；手机宽表可横向滑动。
-6. 单币分析与 thresholds：量 / RSI / MACD、六条件、支撑阻力、会议结论、风险规则和实际策略参数。
-7. 真实事件终端和可折叠的团队时间线、BT60、行情前 30、旧四盘历史。
-
-保留 `#/market`（搜索排序）、`#/coin/ZEC-USDT-SWAP`（独立单币分析）、`#/paper`（原账户明细与历史曲线）路由。手机宽表仅在自身容器内左右滑动，扫描表支持自身滚动，全部币仍可查看。所有缺失数字显示“—”，缺失记录显示“暂无”；缺失策略目录显示“未启动”，不填入示例资金或价格。
-
-## 统一账户快照：模拟盘 / 实盘共用
-
-**首页唯一交易数据来源是 `paper/account.json`**，不从旧账户表拼当前总额。生成器目前固定 `mode=paper`，只读 `/workspace/crypto-bot/paper_main`；会议决议也在主力盘执行。目录不存在时发布未启动占位；目录存在但文件损坏或缺少必要数据时拒绝替换旧快照。不会写入 `/workspace/crypto-bot` 或执行交易程序。
-
-契约入口（完整字段约束见 `tools/account.schema.json`）：
-
-```text
-{
-  mode: "paper" | "live",
-  source: 公开来源说明,
-  updated_at: 带时区的 ISO 8601 时间,
-  accounts: [{
-    id: "paper_main" | "live_main",
-    mode: "paper" | "live",
-    status: "未启动" | "运行中" | "已停手" | "事件窗口禁开新仓" | "已停止",
-    equity: number | null,
-    balance: number | null,
-    daily_pnl: number | null,
-    daily_loss_limit: 小数比例 | null,
-    positions: [...],
-    fills: [...],
-    equity_curve: [...],
-    updated_at?, name?, initial?, day?, day_start?,
-    risk?, strategies?, enabled_strategies?, entry_mode_by_strategy?, strategy_enabled?, manual_status?
-  }],
-  decisions: {status, updated_at, version, meeting, symbols,
-              global_size_factor, blackout_windows}
-}
-```
-
-`id` 是公开的策略别名，**不得填写交易所账户号或 UID**。`name` 只使用角色/策略名。所有账户模式须与顶层相同；同一文件不得混入模拟盘和实盘。未启动账户的金额与日亏上限为 null，三个列表为空。已启动账户必须有真实 balance / equity / daily_loss_limit。
-
-- `positions`：`symbol`（如 `ZEC-USDT-SWAP`）、`side`（1 多 / -1 空）、`qty`（币数量）、`entry`、`stop`、`take_profit`、`leverage`、`mark_price`、`unrealized_pnl`；可附 `margin`、`liquidation_price`、`entry_time`。未知价格和杠杆为 null，不能以入场价代替标记价。OKX 的合约张数需要在服务器端按合约面值转换成币数量。
-- `fills`：`timestamp`、`symbol`、`side`、`kind`（open / close）、`qty`、`price`、`notional=qty×price`、`pnl`（开仓为 null，平仓为净已实现盈亏）。只包含已经执行的真实成交，不包含挂单和撤单。当前模拟程序每个开/平仓事件为一笔；未来实盘按实际 fill 逐笔导出，在服务器端去重，不发布原始订单 ID。
-- `equity_curve`：`[{timestamp,equity}]`，每盘最多采样 500 个真实观测点。首页只绘制 paper_main 的真实观测点，主力盘缺曲线时显示“暂无”。旧四盘仍在历史区展示。
-- `daily_pnl`：当前 UTC+7 日权益变动。可提供 `day` 和真实 `day_start`，前端据此随公共行情重估；常驻余额没有当日起始权益就明确显示基准缺失；策略区兼容快照 daily_pnl 口径。日期过期或基准缺失时不计算今日亏损。生产者须在 UTC+7 换日后更新日初值。
-- `risk`：真实单笔风险、日亏上限、同向风险、固定或分档杠杆、blocked 标记。没有细项时为 null。`strategies` 仅允许 ema / breakout / mean_reversion 及公开数值参数；`strategy_enabled` 是只读状态。
-
-计算口径：
-
-- **常驻余额和 BALANCE = 当前现金余额 + 逐仓标记浮盈**，未启动策略不贡献虚构的零资金；旧四盘永不计入。
-- 常驻余额优先使用浏览器 OKX WebSocket 的有效 tickers / mark-price 报价（45 秒时效），每次报价逐仓重算，亏损按每仓 `−margin` 封顶；缺实时价的仓位单独回退快照 mark_price，并显示回退来源。缺标记价才回退该账户 snapshot equity；空仓直接取快照 equity。已实现盈亏已计入 balance，不重复相加。当日金额 = 当前估值 − 各当前账户的当日起始权益，百分比除以同一基准；跨日或缺基准显示原因。已停止的当前策略保留余额和固定快照权益，停止不表示资产消失。
-- 机器人总盈亏 = 主力盘权益 − 主力盘真实 initial。本金缺失则显示“—”，不猜测起始本金。浮盈列显示未封顶的 `side×qty×(mark−entry)`，未扣未来平仓费和资金费。
-- **FILLS**：当前策略全部 fills 按成交时间归入当前 UTC+7 日，统计笔数并汇总实际成交额，开仓和平仓均计入。
-- **SIZE**：当前所有持仓 `abs(qty×mark_price)` 之和；任一持仓无标记价时显示“—”。
-- 日亏进度逐策略展示：`max(0,−daily_pnl/真实日初权益)`；剩余 = `max(0,daily_loss_limit−日亏比例)`，单位为百分点。达到上限或 blocked 时显示“已停手”。目标风控为 8%，实际上限取快照。
-- 策略停止优先于停手，停手优先于事件窗口。事件窗口遵循 `[start,end)`；限定币种在面板列出，不代表其他币种也被禁开仓。开关不可点击，不从网页控制交易程序。
-
-### 未来实盘推送
-
-在**非美国服务器**使用只读密钥读取交易所数据，在服务器完成币数量换算、去重、UTC+7 日初基准和隐私清洗，输出完全相同的 JSON：顶层与各账户改为 `mode=live`，ID 使用 `live_` 加公开策略别名。
+本次开发期间主力盘被外部暂停、平仓并移入归档。当前公开产物使用这份真实归档，明确标记“已停止 / 历史快照”：
 
 ```bash
-# 在生成/接收端对待发布文件校验，验证成功后再原子替换目标文件。
-python3 tools/validate_account.py /tmp/account-next.json
+python3 tools/make_snapshot.py \
+  --account-source-root /workspace/crypto-bot/archive/2026-11-03-reset \
+  --historical
 ```
 
-`tools/validate_account.py` 只用 Python 标准库，读取 `account.schema.json` 所用的 JSON Schema 关键字并附加跨字段校验：模式一致、别名唯一、未启动金额为空、成交额一致、窗口起止有序、敏感内容过滤。该 schema 也可直接用于标准 Draft 2020-12 校验器（开启 date-time 格式验证）。不接受额外字段，错误信息不输出被拒绝原文。
+`--account-source-root` 只切换主力盘账户、扫描与历史 CSV 的读取目录；当前决议、blackout_windows、事件流和团队仍读取 `--source-root`（默认 `/workspace/crypto-bot`）。账户历史会合并归档和当前日志的 wake 记录并去重。`--historical` 将账户标记为已停止，持仓与估值固定为归档观测。恢复运行后，移除这两个参数使用默认命令即可。不会自动找归档、重启或恢复资金。
 
-密钥只存在于服务器的私有运行环境，**不得放进快照、README、config.js、浏览器请求或静态发布目录**。推送服务只替换公开快照；前端无需更换接口，会自动显示“实盘”。旧 snapshot.json / BT60 / 团队文件可继续保留为历史数据，不会覆盖首页实盘金额。实盘没有对应选填风控参数时界面显示“暂无”，不要沿用模拟盘参数冒充实盘设置。
+其他选项：`--output` 设置兼容快照路径，其他公开文件默认写到相邻目录；`--account-output`、`--team-root`、`--team-output` 可单独指定，`--team-only` 仅生成团队数据。已删除 BT60 / 旧回测表数据生成、参数和相应测试。
 
-## 全市场扫描与主屏选币
+## 手机首页
 
-`make_snapshot.py` 只读主力盘 `paper_main/scan.json`，白名单清洗后原子写入 `paper/scan.json`，包含 instruments、recent_signals、positions。源文件尚未生成时明确显示待更新；生成器不会启动或重启交易进程。扫描表覆盖当前全部交易币池，成交额来自原生1H实际 quote 总量，价差显示百分比；“当前信号”只用最新已收盘1H，预热/行情不足单独标注。最近信号展示48小时内的方向、开仓结果和未开仓原因，maker 待成交也有独立状态。
+- 常驻余额与持仓金额只取 `paper_main`；现金加逐仓浮盈计算权益，每仓亏损按保证金封顶。旧账户不计入总额。
+- 首页主卡显示账户权益和当日盈亏（USDT / %），轻量 SVG 曲线取 `account.json` 的 `equity_curve`，日 / 周为最近24h / 7d，全部为全部观测点；不插入实时估值。没有曲线时显示100U平线与“暂无记录”，缺当日基准显示“—”。
+- 持仓行只显示币种、多空、名义金额和收益（USDT / 保证金百分比）。点击或键盘操作在原地展开同一套1H / 4H K线，显示入场、止损、止盈、保证金和杠杆；同时只打开一行，再点收起。扫描的非持仓信号币进入单币研究。WebSocket 报价失效时依次回退有效 REST、快照标记价。
+- 策略状态、开关、参数只展示启用的均值回归；会议单作为独立执行来源。只读开关不能执行交易。已停止账户如实显示停止状态。
+- 最近信号只展示均值回归和会议单，默认最近 10 条，其余点击“展开”。已停策略信号不显示。扫描默认前 15 行，支持排序、持仓 / 信号筛选及“展开全部”。
+- 单币研究已删除放量突破六条件，改为均值回归入场条件，阈值来自主力盘启用配置中的 `rsi`、`trend`。逐项展示连续 201 根原生 1H 已收盘样本、趋势偏离、EMA50 五根斜率 / ATR、ATR / 收盘、成交额倍数、前一根 RSI、布林带回归；同运行器 `bt60.engine.make_signal` 的 EWM `adjust=False`、布林标准差 `ddof=0`。RSI 多头 `< rsi`、空头 `> 100−rsi`；偏离 `|EMA50/EMA200−1| < trend`；斜率 `< 0.8`；ATR / 价格范围 0.2%–3.5%；成交额 ≥ 前20根均值0.8倍。4H 仅供研究，不判定原生1H执行条件。
+- 已删除归档回测表、归档行情30、旧四盘入口和突破参数。
 
-大K线下拉可选当前全部持仓币与信号币，默认最近开仓的持仓币；空仓时回退 team_status.json 的 meeting 标的，再回退 config.js。周期切换保留所选币。今日会议标的独立标注，主席卡同样标明会议标的，不自动加入交易币池。thresholds 的当前启用策略和 maker/taker 入场方式读取 account.json 的 enabled_strategies、entry_mode_by_strategy；旧主力 state 按其 strategies、entry_mode 恢复配置。
+## 账户历史
 
-## 决议与事件窗口
+所有新增内容集中在 `#/paper` 的五个可折叠分区，手机使用卡片列表。
 
-`make_snapshot.py` 从源目录 `decisions.json` 复制公开字段到 `paper/decisions.json`，同时嵌入 account.json，使首页读取同一批账户与决议。只发布 version、updated_at、meeting、symbols 的 bias/size_factor/note、global_size_factor、blackout_windows 的 start/end/symbols/reason。不复制 manual_orders、订单 ID、文件路径、运行错误或任意未知字段。
+1. **资金曲线与回撤**：`paper/history.json.equity` 完整保留 `paper_main/equity.csv` 的有效观测点，按时间去重，不使用500点采样数据。日 / 周为截至当前最近24h / 7d，全部为完整历史。最大回撤按所选范围从峰值到后续低点的最大百分比计算，显示金额、百分比及峰值 / 低点时间，图上圆点标记起止。当前回撤为所选范围最后观测相对此前峰值的下降；不往权益曲线插入实时估值。
+2. **策略战绩**：只取 `trades.csv` 中 `mean_reversion`、`breakout`、`manual` 的已平仓交易。会议单即 manual；突破只在历史中显示。笔数是完整已平仓交易数，不把开仓和平仓重复计数。胜率 = 净盈利笔数 / 有效已平仓笔数（保本计入分母）；盈亏比 = 平均净盈利 / 平均净亏损绝对值；平均与累计盈亏取 net_pnl（兼容 pnl）。手续费 `fee` 是运行器记录的开平仓手续费总额，**不能再加 entry_fee**。毛盈亏使用 gross_pnl，缺失时按 `side × 币数 × (exit−entry)` 重算。手续费占比 = `Σfee / |Σgross_pnl| × 100%`；分母为零或费用缺失显示“—”。没有亏损样本时盈亏比显示“—”。
+3. **成交记录**：已平仓完整交易按平仓时间倒序，手机卡片、币种和策略筛选、每页20笔；显示 UTC+7 开平时间、币、方向、杠杆、开平价格、开仓名义金额、净盈亏和保证金收益率。名义金额 = 开仓价 × 币数量；盈亏% = `net_pnl / 入场margin × 100%`，缺少保证金显示“—”。数量统一为币，明确标注 contracts 时按 ctVal × ctMult 换算。
+4. **风控仪表**：日亏按 UTC+7 日初权益计算，固定展示距8%熔断的额度使用进度；跨日、缺基准显示缺失。多空分别汇总持仓非负 planned_risk；缺失时用 `|entry−stop| × qty` 重算，除当前权益，与5%上限比较，进度条封顶100%，旁边保留真实比例。每仓止损距离 = `side × (mark−stop)/mark × 100%`，穿越止损可为负。blackout_windows 只输出 start/end/symbols/reason，生效采用 `[start,end)`，进行中显示“禁开中，剩余 …”；否则展示下一个时段倒计时，每秒刷新，列明适用币种，过期窗口不显示。多个窗口重叠时先显示最早结束者，结束后切换到其余进行中窗口。
+5. **异动 → 决策记录**：只取 alerts.jsonl 的 `wake=true`，按 wake_index 分组；缺失编号时按 ts 分组，不丢失异动。只公开时间、币种、固定异动类型、匿名会议单状态和最终净盈亏，不发布 detail / note / 聊天内容 / 订单ID。每个异动币和没有关联单子的组均显示“未采纳”。
 
-四种 bias 为 long / short / watch / ban，界面显示偏多 / 偏空 / 观察 / 禁开仓。单币分析显示对应币的 bias 与 note；参数面板列出公开决议、正在生效和未来事件窗口，过期窗口不冒充生效中。缺文件时 status=missing，界面显示暂无。公开文本先扫描完整值，再截断，发现敏感文本时置空。
+### 异动引用与关联规则
 
-## 保留的数据逻辑
+建议未来在 `decisions.json.manual_orders[]` 增加以下任一可选字段（也兼容决议顶层字段）：
 
-生成器继续输出 `paper/snapshot.json`，供原模拟盘历史路由使用。读取 state.json、trades.csv、events.jsonl、equity.csv，不导入运行器。兼容传统 `engines` 格式和主力程序的 quantity / instId / net_pnl / target 字段。开仓只取实际 trade_opened，平仓合并 CSV 与 state 并去重；maker_placed 不算成交。
-
-四个旧盘 paper_1h / paper_4h / paper_1h_aggr / paper_4h_aggr 固定为已停止，灰色历史卡与虚线曲线继续保留。旧盘缺风控时仅沿用原模拟程序默认值（1%、3 仓、3×、日亏 5%）并注明；新主力盘必须提供真实风控，不使用旧默认值。明确的 stopped 日志或停止状态优先；无明确状态时沿用两小时有效源数据时效判定。
-
-`paper/team.json` 保留六角色的状态、当前任务、最新有效报告和评级，时间线支持角色+会议组合筛选。生成器读取 team/team_status.json、team/team_log.jsonl，按真实时间倒序取最近 200 条。阶段仅 P0–P7，状态仅工作中/已完成/待命/离线，评级为 A–F 加可选 + / -（如 A-、B+）或 null，保留符号、按字母着色。非法记录跳过，warnings.details 记录字段名及日志行号/固定角色名与原因代码，不包含原文。标题最多 40 字、摘要和任务 200 字。对完整原记录（包括未知字段）过滤姓名黑名单、凭证关键字、长 token、邮箱、手机号和账户标签，命中则丢弃，不输出原文。坏行与缺团队文件不会伪造报告。
-
-```bash
-python3 tools/make_snapshot.py --team-only
-python3 tools/make_snapshot.py --bt60-only
-python3 tools/make_snapshot.py --source-root /只读源目录 --output paper/snapshot.json
-# 统一账户输出可用 --account-output 指定；团队/回测也有独立输出参数，见 --help。
+```json
+{"symbol":"BTC-USDT-SWAP","side":"long","alert_ref":12}
 ```
 
-`paper/bt60.json` 保留 results/bt60_summary.csv、bt60_qualified.csv 的全部白名单指标、参数、样本内/样本外/全60天分段和真实合格记录。数据区间来自原 markdown，不按当前日期猜测。价差条件无历史数据，未用于回测。三段独立起算，收益不可相加；盈亏比为平均净盈利/平均净亏损绝对值，成本指标沿用原列名。完整成本和执行指标在每组中展开。
+或 `"source_alert":"2026-11-03T00:47:07.596+07:00"`。字段值是原始 `wake_index`（整数或整数字符串）或原始异动 `ts`（带时区时间戳）。这些引用只在生成器内部使用，公开结果只给出 `match=exact|time`。
 
-所有源文件先读取、验证再发布，单文件用临时文件原子替换；多个输出文件不是跨文件事务。前端失败时保留已有数据，显示延迟或读取失败并自动重试。
+精确引用优先，并要求同币；引用存在但没有命中时不降级为模糊时间关联。无引用时，匹配同币且决议 updated_at 或订单创建 / 更新时间、状态成交时间位于异动之后 `[0,24h]` 的候选；一个订单只分配给最近一组候选。时间候选不代表因果。旧订单会从主力盘 manual_status 的 order 恢复，避免 decisions.json 替换后丢失。
 
-## 行情与指标
+manual_status 优先用内部订单ID关联；ID不会公开。最终盈亏仅关联 paper_main/trades.csv 中同币 manual 成交的相同内部 order_id；CSV缺ID时，仅使用同币、精确开仓时间等于状态成交时间的记录。没有精确成交对应时盈亏留空，不能把同币其他单的盈亏串过来。净盈亏包括运行器已记录的费用 / 资金费 / 逐仓保险补偿，若运行器之后补记资金费，重新生成快照即更新。
 
-OKX 接口白名单：market/tickers、market/candles、public/funding-rate、public/open-interest。仅 GET，credentials=omit。全局队列至少间隔 150ms，最多 3 并发，保留请求合并、12 秒超时和限流冷却。REST 行情 8 秒、K 线 / 资金费率 / 持仓量 / 快照 60 秒刷新。浏览器同时连接 `wss://ws.okx.com:8443/ws/v5/business` 的 candle1H / candle4H、`/ws/v5/public` 的 tickers / mark-price，订阅随选币与持仓变化重建。每连接指数退避 1 / 2 / 4 秒，默认连续 4 次失败回退 REST，不伪装实时；心跳、首包超时和行情停滞会断线重连。后台页关闭连接、停止轮询并暂停动画，恢复时重新同步。
+## 白名单与发布
 
-- 前 30 按 `volCcy24h×last` 估算 USDT 成交额排序；持仓额为 oiCcy×last，费率不年化。
-- K 线 1H/4H 各取 300 根，主图含未收盘 K 线。
-- EMA20/50/200 使用 SMA 种子，`α=2/(N+1)`；预热留空。
-- RSI14 使用 Wilder 平滑；全平 50，无下跌 100，无上涨 0。
-- MACD(12,26,9) 的柱为 DIF−DEA，不乘 2。
-- 六条件只用 confirm=1 的已收盘 K 线，至少 51 根：突破前20根最高价；成交额≥前20根均值1.5倍；收盘位置≥0.7；EMA20>EMA50且收盘>EMA20；50<RSI14<70；MACD柱为正且增大。
-- 前20/50根支撑阻力均排除信号自身。技术卡固定看1H，主图和底部分析随1H/4H切换。EMA200需要200根预热，300根种子与更长历史可能略有差异。
+`tools/make_snapshot.py` 与 `tools/history_snapshot.py` 只构建明确字段的新对象，禁止透传源对象。`tools/account.schema.json` 和 `tools/validate_account.py` 验证账户模式、必填数值、合约数量、成交额、窗口时间及敏感内容；schema拒绝额外字段。主力盘持仓新增 nullable 非负 `planned_risk`。
 
-## v2 状态与动态效果
+公开的 history 契约为 `{schema_version,account_id,generated_at,historical,equity,trades,alert_groups}`。trade 只含数值、策略枚举、symbol、side、entry_time、exit_time、reason；alert仅固定类型/符号/时间/是否关联，order仅symbol/side/status/time/closed_time/pnl/match。未知平仓原因保留不敏感的短原因码；包含凭证、姓名黑名单、聊天原文或非法格式的原因拒绝发布。对公开字符串先检查完整值再截断。异动事件摘要仅固定类型标签与有限数值，绝不使用 detail 或字符串 value。
 
-所有角色动作来自公开状态：待命呼吸 / 眨眼；工作中打字、轻晃头、屏幕扫光、光环和边框流光；已完成显示勾；team.json 显式离线，或源 status.updated_at / generated_at 任一超过 config.js 的 offlineMinutes（默认 15 分钟），停止动作并显示原因与 zzz。首次读取 team_log 静默；之后真正新增的记录触发挥手、文件传递与通知，重排 / 旧记录回流不重播。新开仓事件触发操盘跳跃，止损平仓 / 日停手事件触发风控举牌；离线角色不播放动作。背景光斑只在存在有效行情或新鲜团队状态时流动。
+团队数据只发布六角色、经过过滤的结构化报告、任务和评级；不发布任意未知字段或群聊原文。公开文本过滤已有姓名黑名单、密钥关键词、长token、邮箱、手机号、账户标识；会议信息和事件窗口原因同样过滤。原始备注、私有ID、错误栈、服务器文件路径和凭证不得进入快照。
 
-生成器只读 paper_main/events.jsonl，并读取存在时的 alerts.jsonl 最近 100 行，按时间合并后保留最新 300 条到 paper/events.json；不读取会议账户事件。交易事件只允许 ts / type / coin / strategy / direction / price / reason，类型、策略、原因均固定词表；币种格式校验，价格只接受有限正数；币池数量只从非负整数生成。不复制原错误、任意配置文本、文件路径、内部 ID 或凭证。未知类型跳过，未知原因显示“原因未公开”。终端首载直接显示旧事件，新增逐字显示；无记录显示“暂无事件”，读取失败保留已有内容并说明。
+静态发布仅包含 `index.html`、`config.js`、`assets/`、`paper/`、`.nojekyll`。不要发布 tools、tests、截图、视频、源CSV或运行环境文件。禁止将密钥、真名、群聊原文写入浏览器资源。不会 git commit 或自动部署。
 
-异动输入只读取 ts / symbol / type / value / detail / source_url；type、value、detail 清洗并合成最多 80 字短句，公开类型为“异动”，日志终端以琥珀色显示。source_url 只允许无凭证的 HTTPS 公开链接，拒绝本机、私网和内部域名；不存在 alerts.jsonl 时照常生成。
+行情仅使用 OKX 公共 GET 和公开 WebSocket，credentials=omit。CSP 限制固定CDN / OKX端点。前端保留请求限速、重试、过期回退与后台暂停；不调用私有交易接口。所有时间显示 UTC+7；`config.js.startDate` 控制 DAY 起点。支持 reduced-motion、低性能设备和无图表库时的文本数据回退。历史权益图是本地 SVG，不依赖外部图表库。
 
-paper_main 的 state.json 或 scan.json 中 manual_status 转成匿名会议挂单表，只含币、方向、限价、止损、止盈、有效期和 pending / filled / expired / rejected / cancelled 状态。实盘进程区显示该表，缺字段显示“—”，缺数据隐藏；strategy=manual 的持仓标“会议单”。不公开订单 ID、备注和运行器原因。
-
-prefers-reduced-motion 关闭所有动画、流光、数字滚动和逐字效果，内容直接显示，数值变化仍以颜色提示。hardwareConcurrency ≤ 4、deviceMemory ≤ 4 或不支持 backdrop-filter 时，取消模糊并减少光斑。CSS 动画仅使用 transform / opacity。
-
-## 自测与录屏
+## 测试与截图
 
 ```bash
 npm test
 python3 -m unittest discover -s tests -p 'test_*.py' -v
 python3 tools/validate_account.py paper/account.json
-# 先运行 http.server，使用指定 Python Playwright：
-PANEL_URL=http://127.0.0.1:8008/ /home/box/.pw/bin/python tests/layout_browser.py
-PANEL_URL=http://127.0.0.1:8008/ /home/box/.pw/bin/python tests/scan_browser.py
+# 启动本地 http.server 后，最终统一执行一次：
+PANEL_URL=http://127.0.0.1:8008/ /home/box/.pw/bin/python tests/history_browser.py
 ```
 
-layout_browser.py 调用 v2_browser.py，先在隔离响应中验证新记录 / WebSocket 报价 / 动画 / reduced-motion / 离线，再用真实快照和公共行情生成正式产物。测试数据不写 paper，也不出现在首页截图和首页视频。真实环境验证 1440 桌面、390 / 360 / 320 手机无页面横向溢出、滚动时右上角余额常驻、1H / 4H、展开区和市场 / 历史路由。区分应用 console.error / pageerror 与 Chromium 自行记录的外部网络错误，并如实报告；WebSocket 失败时首页显示轮询或离线和快照标记价来源。
+单元测试覆盖最大 / 当前回撤、日周范围、战绩、费用分母、原因映射、8% / 5%风险与缺失基准、倒计时边界、同币24h / 精确引用 / 未采纳、匿名状态与最终盈亏、白名单脱敏及源文件只读。删除的旧突破六条件和BT60测试已替换或移除。
 
-- shot-mobile.png：390×844 首屏；shot-mobile-full.png：390px 整页；shot-desktop.png：1440px 整页。
-- rec-mobile.webm：首页 390×844 的真实数据视频，10 秒。
-- rec-demo.webm：独立 tests/demo.html，390×844、10 秒，始终标注“演示数据”；从 tests/fixtures/demo.json 读取六角色的八组演示场景，支持重新播放，不进入首页导航。
+统一浏览器验收覆盖首页精简、15行 / 10条展开、选币与1H/4H、账户历史所有分区、筛选 / 分页 / 折叠 / 倒计时、390 / 360px 页面无横向溢出及控制台错误。合成响应只用于隔离交互断言，不写入 paper；最终 `shot-history.png` 使用真实公开历史快照，390×844，首屏截图，已加入 `.gitignore`。此前截图和录屏的忽略规则保留。
 
-截图和视频均已加入 .gitignore。测试目录与录屏不得进入静态发布包。
 
-## 静态发布文件
+暂停与重置读取 `paper_main/PAUSED.json` 的公开字段，归档路径不会进入快照。`reset=true` 且状态文件缺失时，余额/权益取 `next_initial_equity`，成交、资金曲线和持仓为空；日志、异动、团队报告及决议按 `reset_at` 过滤。重置期间不从历史目录回填账户，也不假设旧风控参数。暂停横幅中的 since 使用重置后的有效起点。
 
-发布仅包含 `index.html`、`config.js`、`assets/`、`paper/`、`.nojekyll`。不要发布 tools、tests、参考图、截图、私有源数据或运行环境文件。相对资源路径与 hash 路由支持项目子目录，无需构建。
+首屏只保留一个 SVG 团队吉祥物，`mascotState(snapshot)` 以输入的 `now` 计算优先级：离线、暂停、止损、开仓、异动、盈利、待命；近期事件窗口为 15 分钟。机器人在预留区域内拖动，位置保存到 localStorage；点按切换表情和真实状态气泡，“团队报告”打开可用 Esc 关闭的底部抽屉。reduced-motion、CPU 核数或内存不超过 2 时禁用循环动画。
 
-图表固定为 jsDelivr 的 Lightweight Charts 4.2.2，保留 TradingView 归属。正文字体固定为 CDN `@fontsource-variable/inter@5.1.0`，中文回退 PingFang SC / Microsoft YaHei / Noto Sans SC；数字为本地 JetBrains Mono（5.1.2）和 tabular-nums。CSP 仅允许同源静态资源、固定 CDN 资源、www.okx.com REST 与指定 OKX 公共 WebSocket。
+新增验收：`PANEL_URL=http://127.0.0.1:8008/ /home/box/.pw/bin/python tests/mascot_browser.py`，覆盖重置空页、鼠标/触摸、拖动与点击、位置恢复、收起、报告、Esc 和动画降级。生成真实公开快照下的 `shot-mobile.png`、`shot-history.png`、`shot-mascot.png`、`shot-drawer.png`（均 390×844）及不超过 8 秒的 `rec-mascot.webm`；这些文件全部忽略，不写入 Git。
+
+
+### 浅色首页与币种图标
+
+主题集中在 `assets/style.css` 的 CSS 变量：浅灰底、白卡、浅灰边框和轻阴影，无玻璃滤镜与光斑。正文、次要文字、涨绿跌红及强调色按 WCAG AA 4.5:1 检查；K线和权益图均使用浅色背景与网格。
+
+币种图标来自 [spothq/cryptocurrency-icons](https://github.com/spothq/cryptocurrency-icons)，采用 [CC0 1.0 Universal](https://github.com/spothq/cryptocurrency-icons/blob/master/LICENSE.md)，下载脚本固定上游提交，许可副本随仓库存于 `assets/coins/LICENSE.md`。页面只读本地 `assets/coins/<symbol>.svg`，固定26px、lazy加载。SPCX、INTC、XAU等缺图标币种按符号哈希生成彩色圆底及首字母；图片加载失败同样回退，不请求外部图标CDN。
+
+```bash
+python3 tools/fetch_icons.py                            # 当前公开扫描/持仓币池；已有缓存不重复下载
+python3 tools/fetch_icons.py --universe /path/to/universe.json  # 支持 symbols 数组或 instId 合约列表
+npm test
+python3 -m unittest discover -s tests -p 'test_*.py'
+PANEL_URL=http://127.0.0.1:8008/ /home/box/.pw/bin/python tests/home_browser.py
+```
+
+`tests/home_browser.py` 验证权益卡/区间、单行展开/收起与键盘操作、复用K线/价位线、刷新保留展开状态、缺图标回退及320–1440px无溢出。产出390×844浅色截图 `shot-home.png`（真实暂停快照）、`shot-home-demo.png`（`tests/fixtures/home.json` 的2个假持仓，展开一行）与10秒以内 `rec-home.webm`（区间切换、展开持仓、点击吉祥物、打开报告抽屉）。演示数据仅通过Playwright响应拦截注入，不写入公开数据，产物均已加入 `.gitignore`。

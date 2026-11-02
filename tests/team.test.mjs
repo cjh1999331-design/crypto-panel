@@ -4,14 +4,16 @@ import { execFileSync } from 'node:child_process';
 import { ROLES, validTeam, teamCards as cards, teamTime, filteredLogs, timelineMarkup, gradeMarkup } from '../assets/team.mjs';
 const data = JSON.parse(execFileSync('python3',['-c', `import sys,json;sys.path.insert(0,'tools');from make_snapshot import build_team;print(json.dumps(build_team('tests/fixtures/team')))`],{encoding:'utf8'}));
 data.generated_at=data.status.updated_at;
-const teamCards=(d,details)=>cards(d,details,{now:Date.parse(data.status.updated_at)});
-test('团队空数据：六张离线卡、无评级、暂无记录', () => {
+const teamCards=(d,details)=>cards(d,details,{now:Date.parse(data.status.updated_at),snapshotAt:data.status.updated_at});
+test('快照新鲜、团队空数据：六张待命卡、无评级、暂无记录', () => {
   const empty = {schema_version:1,status:{roles:{}},log:[]};
   assert.equal(validTeam(empty),true);
   const cards=teamCards(empty);
   assert.equal((cards.match(/class="role-card/g)||[]).length,6);
   for (const name of Object.values(ROLES)) assert.ok(cards.includes(name));
-  assert.equal((cards.match(/>离线</g)||[]).length,6);
+  assert.equal((cards.match(/>待命</g)||[]).length,6);
+  assert.equal((cards.match(/state-idle motion-idle/g)||[]).length,6);
+  assert.doesNotMatch(cards,/state-offline|超过 .* 分钟未更新/);
   assert.equal((cards.match(/grade-none/g)||[]).length,6);
   assert.match(timelineMarkup(empty),/暂无记录/);
   assert.equal(teamTime(null),'—');

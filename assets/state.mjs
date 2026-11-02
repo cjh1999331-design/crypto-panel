@@ -3,13 +3,14 @@ export function isStale(ts, now=Date.now(), minutes=15) {
   const at=Date.parse(ts);
   return !Number.isFinite(at) || at>now+60000 || now-at>minutes*60000;
 }
-export function roleState(data, role, {now=Date.now(), offlineMinutes=15}={}) {
+export function roleState(data, role, {now=Date.now(), offlineMinutes=15, snapshotAt=null}={}) {
   const r=data?.status?.roles?.[role];
-  if (!r) return {status:'离线',state:'offline',reason:'暂无角色状态'};
-  if(r.status==='离线')return {status:'离线',state:'offline',reason:'团队标记离线'};
-  if(isStale(data.status.updated_at,now,offlineMinutes) || isStale(data.generated_at,now,offlineMinutes))
-    return {status:'离线',state:'offline',reason:`团队状态或快照超过 ${offlineMinutes} 分钟未更新`};
-  return {status:r.status,state:({'工作中':'working','待命':'idle','已完成':'done'})[r.status] || 'offline',reason:r.task || '暂无当前任务'};
+  if(Number.isFinite(Date.parse(snapshotAt)) && now-Date.parse(snapshotAt)>offlineMinutes*60000)
+    return {status:'离线',state:'offline',reason:`快照超过 ${offlineMinutes} 分钟未更新`};
+  if (!r) return {status:'待命',state:'idle',reason:'暂无角色状态'};
+  if(isStale(snapshotAt,now,offlineMinutes) || isStale(data.status.updated_at,now,offlineMinutes) || isStale(data.generated_at,now,offlineMinutes) || !['工作中','待命','已完成'].includes(r.status))
+    return {status:'待命',state:'idle',reason:r.task || '暂无当前任务'};
+  return {status:r.status,state:({'工作中':'working','待命':'idle','已完成':'done'})[r.status],reason:r.task || '暂无当前任务'};
 }
 // A multiset identity handles anonymous duplicates. A watermark prevents replay
 // when a rolling snapshot drops and later reintroduces an old row.
@@ -47,10 +48,11 @@ export function publicHttpsUrl(value){
 }
 export function eventText(r){return [EVENT_LABELS[r.type] || '事件',r.coin?.replace('-USDT-SWAP',''),({ema:'EMA 趋势',breakout:'突破放量',mean_reversion:'均值回归'})[r.strategy],r.direction,r.price==null?'':`@ ${r.price}`,r.reason].filter(Boolean).join(' · ');}
 export function validEvents(data){
- const fields=new Set(['ts','type','coin','strategy','direction','price','reason','source_url']);
+ const fields=new Set(['ts','type','coin','strategy','direction','price','reason','source_url','wake']);
  return data?.schema_version===1 && Array.isArray(data.events) && data.events.length<=300 && data.events.every(r=>
    Object.keys(r).every(k=>fields.has(k)) && Number.isFinite(Date.parse(r.ts)) && Object.hasOwn(EVENT_LABELS,r.type) &&
    (r.coin===null || /^[A-Z0-9]+-USDT-SWAP$/.test(r.coin)) && (r.strategy===null || ['ema','breakout','mean_reversion'].includes(r.strategy)) &&
    (r.direction===null || ['多','空'].includes(r.direction)) && (r.price===null || Number.isFinite(r.price) && r.price>0) && (r.reason===null || typeof r.reason==='string' && r.reason.length<=80) &&
+   (r.wake===undefined || r.type==='异动' && typeof r.wake==='boolean') &&
    (r.source_url===undefined || r.type==='异动' && publicHttpsUrl(r.source_url)));
 }

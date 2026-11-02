@@ -114,50 +114,6 @@ class SnapshotTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 m.build_snapshot(empty)
 
-    def make_bt60(self):
-        root = self.root / 'results'
-        root.mkdir()
-        rows = [dict(strategy='SECRET_SENTINEL', strategy_code='ema', timeframe='1H',
-                     segment=segment, parameters='{"fast":12,"secret":"SECRET_SENTINEL"}',
-                     trades='45', return_pct='4.209946966548586', fees='6.3805010892878675',
-                     payoff_ratio='', gross_pnl='NaN', api_key='SECRET_SENTINEL')
-                for segment in ('选参段', '样本外', '全60天')]
-        for name, data in [('bt60_summary.csv', rows), ('bt60_qualified.csv', [rows[1]])]:
-            with (root / name).open('w', newline='') as f:
-                writer = csv.DictWriter(f, fieldnames=list(rows[0]))
-                writer.writeheader()
-                writer.writerows(data)
-        (root / 'bt60_summary.md').write_text('生成时间：2026-11-02T12:06:59.319625+00:00。\n区间为 UTC [2026-09-03 00:00, 2026-11-02 00:00)，样本外为 [2026-10-13 00:00, 2026-11-02 00:00)。\nSECRET_SENTINEL')
-        return root
-
-    def test_bt60_values_qualified_whitelist_and_periods(self):
-        root = self.make_bt60()
-        before = {p.name:p.read_bytes() for p in root.iterdir()}
-        result = m.build_bt60(root)
-        self.assertEqual(len(result['rows']), 3)
-        self.assertEqual(result['rows'][1]['return_pct'], 4.209946966548586)
-        self.assertEqual(result['rows'][1]['fees'], 6.3805010892878675)
-        self.assertIsNone(result['rows'][0]['payoff_ratio'])
-        self.assertIsNone(result['rows'][0]['gross_pnl'])
-        self.assertEqual([r['qualified'] for r in result['rows']], [False, True, False])
-        self.assertTrue(all(r['qualified_combination'] for r in result['rows']))
-        self.assertEqual(result['period']['start'], '2026-09-03T00:00:00.000000Z')
-        self.assertEqual(result['out_of_sample']['start'], '2026-10-13T00:00:00.000000Z')
-        self.assertEqual(result['note'], '价差条件无历史数据，未用于回测')
-        self.assertNotIn('SECRET_SENTINEL', json.dumps(result))
-        self.assertEqual({p.name:p.read_bytes() for p in root.iterdir()}, before)
-
-    def test_bt60_missing_dates_and_mismatched_qualification(self):
-        root = self.make_bt60()
-        (root / 'bt60_summary.md').write_text('缺少日期')
-        result = m.build_bt60(root)
-        self.assertIsNone(result['period'])
-        self.assertIsNone(result['generated_at'])
-        p = root / 'bt60_qualified.csv'
-        p.write_text(p.read_text().replace('ema', 'breakout'))
-        with self.assertRaises(ValueError):
-            m.build_bt60(root)
-
     def test_atomic_output_and_sampling(self):
         output = self.root / 'public/snapshot.json'
         result = m.build_snapshot(self.root)

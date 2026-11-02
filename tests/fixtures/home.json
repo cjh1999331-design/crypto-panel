@@ -1,0 +1,7 @@
+{
+  "positions": [
+    {"symbol":"BTC-USDT-SWAP","side":1,"qty":0.002,"entry":68000,"stop":65000,"take_profit":74000,"margin":27.2,"leverage":5,"mark_price":69200,"unrealized_pnl":2.4,"strategy":"manual"},
+    {"symbol":"SPCX-USDT-SWAP","side":-1,"qty":0.5,"entry":100,"stop":105,"take_profit":90,"margin":10,"leverage":5,"mark_price":102,"unrealized_pnl":-1,"strategy":"mean_reversion"}
+  ],
+  "equity": [{"hours":240,"value":100},{"hours":140,"value":101},{"hours":48,"value":99.5},{"hours":20,"value":100.8},{"hours":6,"value":101.8},{"hours":0,"value":101.4}]
+}

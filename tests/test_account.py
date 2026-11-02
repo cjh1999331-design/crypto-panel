@@ -97,6 +97,61 @@ class PublicAccountTests(unittest.TestCase):
         (directory / 'scan.json').write_text('{broken')
         self.assertEqual(build_public_accounts(self.root,self.now)['accounts'][0]['manual_status'], [])
 
+    def test_amount_fields_pending_and_contract_normalization_are_whitelisted(self):
+        from make_snapshot import clean_pending_orders, clean_manual_status, build_scan
+        directory = self.make_main()
+        state = json.loads((directory / 'state.json').read_text())
+        spec = dict(ctVal='.1', ctMult='2', private='PRIVATE_SENTINEL')
+        state['market_specs'] = {'BTC-USDT-SWAP': spec}
+        state['engines'] = {'BTC-USDT-SWAP': dict(position=dict(side=-1, contracts=10, entry=100,
+            stop=105, margin=40, strategy='breakout', private='PRIVATE_SENTINEL'))}
+        state['prices'] = {'BTC-USDT-SWAP': 90}
+        maker = dict(instId='BTC-USDT-SWAP', quantity=3, side=-1, entry=101, stop=105,
+            target=95, planned_risk=13, margin=30.3, leverage=10, strategy='mean_reversion',
+            expires_ts=1793664000000, order_id='PRIVATE_SENTINEL', note='PRIVATE_SENTINEL')
+        state['pending_orders'] = {'BTC-USDT-SWAP': maker}
+        state['manual_status'] = {'private-id': dict(status='pending',order=dict(symbol='ZEC-USDT-SWAP',
+            side='long',entry=100,stop=90,take_profit=120,quantity=2,notional=200,planned_risk=22,
+            note='PRIVATE_SENTINEL'), reason='PRIVATE_SENTINEL')}
+        (directory / 'state.json').write_text(json.dumps(state))
+        result = validate_account(build_public_accounts(self.root,self.now))
+        main = result['accounts'][0]
+        position = main['positions'][0]
+        self.assertEqual(position['qty'],2)
+        self.assertEqual(position['qty_unit'],'base')
+        self.assertEqual(position['notional'],180)
+        self.assertEqual(position['unrealized_pnl'],20)
+        self.assertEqual(main['equity'],120)
+        order = main['pending_orders'][0]
+        self.assertEqual((order['qty'],order['limit'],order['notional'],order['planned_risk']),(3,101,303,13))
+        self.assertEqual(order['take_profit'],95)
+        self.assertIsNotNone(order['valid_until'])
+        self.assertEqual(main['manual_status'][0]['planned_risk'],22)
+        self.assertNotIn('PRIVATE_SENTINEL',json.dumps(result))
+        (directory / 'scan.json').write_text(json.dumps(dict(schema_version=1,generated_at=self.now.isoformat(),
+            instruments=[],positions=[],recent_signals=[])))
+        scan = build_scan(self.root,self.now)
+        self.assertEqual(scan['pending_orders'],main['pending_orders'])
+        self.assertEqual(scan['manual_status'],main['manual_status'])
+        self.assertNotIn('PRIVATE_SENTINEL',json.dumps(scan))
+        # Base quantities are already converted by the runner; never multiply again.
+        base = clean_position('BTC-USDT-SWAP',dict(side=1,qty=2,entry=100,stop=90,margin=20),spec)
+        self.assertEqual(base['qty'],2)
+        self.assertEqual(clean_pending_orders([dict(maker,qty=10,quantity=None,qty_unit='contracts')],{'BTC-USDT-SWAP':spec})[0]['qty'],2)
+        risk = clean_manual_status([dict(status='pending',symbol='BTC-USDT-SWAP',side=1,
+            limit=100,stop=90,qty=2)])[0]
+        self.assertEqual((risk['notional'],risk['planned_risk']),(200,20))
+        sized = clean_manual_status([dict(status='pending',symbol='BTC-USDT-SWAP',side=1,
+            limit=100,stop=90,size_usdt=200)])[0]
+        self.assertEqual((sized['qty'],sized['planned_risk']),(2,20))
+        bad = copy.deepcopy(result)
+        bad['accounts'][0]['positions'][0].update(qty_unit='contracts',ctVal=None)
+        with self.assertRaises(ValueError):validate_account(bad)
+        for field in ('pending_orders','positions','manual_status'):
+            bad = copy.deepcopy(result)
+            bad['accounts'][0][field][0]['private']='PRIVATE_SENTINEL'
+            with self.assertRaises(ValueError):validate_account(bad)
+
     def test_decisions_whitelist_and_redaction_before_truncation(self):
         raw = dict(version=2,updated_at=self.now.isoformat(),meeting='公开会议',global_size_factor=.5,
             symbols={'BTC-USDT-SWAP':dict(bias='watch',size_factor=.2,note='观察支撑'),

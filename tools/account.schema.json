@@ -42,7 +42,8 @@
               "运行中",
               "已停手",
               "事件窗口禁开新仓",
-              "已停止"
+              "已停止",
+              "暂停"
             ]
           },
           "equity": {
@@ -151,6 +152,40 @@
                     "mean_reversion",
                     "manual"
                   ]
+                },
+                "qty_unit": {
+                  "enum": [
+                    "base",
+                    "contracts"
+                  ]
+                },
+                "ctVal": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "exclusiveMinimum": 0
+                },
+                "ctMult": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "exclusiveMinimum": 0
+                },
+                "notional": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "planned_risk": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0
                 }
               },
               "required": [
@@ -461,6 +496,188 @@
                     "rejected",
                     "cancelled"
                   ]
+                },
+                "qty_unit": {
+                  "enum": [
+                    "base",
+                    "contracts"
+                  ]
+                },
+                "ctVal": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "exclusiveMinimum": 0
+                },
+                "ctMult": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "exclusiveMinimum": 0
+                },
+                "notional": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "qty": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "planned_risk": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "margin": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "leverage": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "status"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "pending_orders": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "symbol": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[A-Z0-9]+-USDT-SWAP$"
+                },
+                "side": {
+                  "enum": [
+                    null,
+                    -1,
+                    1
+                  ]
+                },
+                "limit": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "exclusiveMinimum": 0
+                },
+                "stop": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "exclusiveMinimum": 0
+                },
+                "take_profit": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "exclusiveMinimum": 0
+                },
+                "valid_until": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
+                },
+                "status": {
+                  "enum": [
+                    "pending",
+                    "filled",
+                    "expired",
+                    "rejected",
+                    "cancelled"
+                  ]
+                },
+                "qty_unit": {
+                  "enum": [
+                    "base",
+                    "contracts"
+                  ]
+                },
+                "ctVal": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "exclusiveMinimum": 0
+                },
+                "ctMult": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "exclusiveMinimum": 0
+                },
+                "notional": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "qty": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "planned_risk": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "margin": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "leverage": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "strategy": {
+                  "enum": [
+                    null,
+                    "ema",
+                    "breakout",
+                    "mean_reversion",
+                    "manual"
+                  ]
                 }
               },
               "required": [
@@ -611,6 +828,42 @@
         "blackout_windows",
         "global_size_factor"
       ],
+      "additionalProperties": false
+    },
+    "pause": {
+      "type": "object",
+      "properties": {
+        "paused": {
+          "type": "boolean"
+        },
+        "reset": {
+          "type": "boolean"
+        },
+        "reset_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "since": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "next_initial_equity": {
+          "type": "number"
+        },
+        "final_equity": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      },
       "additionalProperties": false
     }
   },

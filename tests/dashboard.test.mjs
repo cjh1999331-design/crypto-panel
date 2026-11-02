@@ -42,7 +42,7 @@ test('UTC+7 日界和缺失基准不伪造日亏，旧交易日与冻结状态�
 });
 test('技术卡只使用已收盘的 1 小时样本，正确显示金叉 / 死叉',()=>{
  const bars=Array.from({length:250},(_,i)=>({time:now/1000+i*3600,open:100+i,high:102+i,low:99+i,close:101+i,volume:10,turnover:1000,confirm:'1'}));
- const rising=technicalStatus(bars);assert.match(rising.cross,/金叉/);assert.ok(rising.count>=0&&rising.count<=6);
+ const rising=technicalStatus(bars);assert.match(rising.cross,/金叉/);assert.ok(rising.count>=0&&rising.count<=7);
  const pending={...bars.at(-1),time:bars.at(-1).time+3600,close:1,confirm:'0'};assert.deepEqual(technicalStatus([...bars,pending]),rising);
  const falling=bars.map((b,i)=>({...b,open:400-i,close:399-i,high:401-i,low:398-i}));assert.match(technicalStatus(falling).cross,/死叉/);
  assert.equal(technicalStatus(bars.slice(0,30)).count,null);

@@ -55,6 +55,21 @@ def real_artifacts(browser):
         assert '暂无' not in page.locator('#pinned-equity').inner_text()
         assert page.locator('#alerts').inner_text()==''
         page.screenshot(path=str(ROOT/'shot-mobile.png'))
+        page.locator('.execution-panel').screenshot(path=str(ROOT/'shot-positions.png'),style='html{scroll-padding-top:0!important}.header{position:static!important}')
+        for width in (390,360):
+            page.set_viewport_size({'width':width,'height':844});no_overflow(page)
+            for cell in page.locator('#live-positions td,#manual-orders td').all():
+                assert cell.is_visible()
+                rect=cell.bounding_box();assert rect['x']>=0 and rect['x']+rect['width']<=width,rect
+        page.set_viewport_size({'width':390,'height':844})
+        tabs=page.locator('#coin-tabs button')
+        if tabs.count()>1:
+            tabs.nth(1).click()
+            page.wait_for_function("() => !document.querySelector('#candle-updated').textContent.includes('加载中') && document.querySelectorAll('#chart-levels span').length>0")
+            page.mouse.move(0,0)
+            page.locator('.room').screenshot(path=str(ROOT/'shot-kline.png'),style='html{scroll-padding-top:0!important}.header{position:static!important}')
+        else:raise AssertionError('真实快照少于两个币，无法生成第二币截图')
+        page.evaluate('window.scrollTo(0,0)')
         page.screenshot(path=str(ROOT/'shot-mobile-full.png'),full_page=True)
         # Screen capture starts with already loaded real data. Keep ten full seconds.
         start=page.evaluate('performance.now()/1000')
@@ -191,12 +206,65 @@ def contracts(browser):
     page.wait_for_timeout(100)
     assert page.locator('[class*="motion-working"],[class*="effect-"],.number-in,.report-particle,.typing-line').count()==0
     assert page.locator('.robot-body').first.evaluate('e=>getComputedStyle(e).animationName')=='none'
-    team['status']['updated_at']=stamp(now-timedelta(minutes=16))
-    page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
-    page.wait_for_selector('.state-offline')
+    page.emulate_media(reduced_motion='no-preference')
+    old=stamp(now-timedelta(minutes=16))
+    roles=list(team['status']['roles'].values())
+    for i,r in enumerate(roles):r['status']=('工作中','已完成','待命','离线')[i%4]
+    # Team timestamps expire independently; a fresh account keeps every role idle.
+    for field in ('updated_at','generated_at'):
+        team['status']['updated_at']=team['generated_at']=ts
+        if field=='updated_at':team['status'][field]=old
+        else:team[field]=old
+        page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+        page.wait_for_function("() => document.querySelectorAll('.state-idle.motion-idle').length===6")
+        assert page.locator('.state-offline,.state-working,.state-done').count()==0
+        for card in page.locator('.role-card').all():
+            assert card.locator('.team-badge').inner_text()=='待命'
+            assert float(card.evaluate('e=>getComputedStyle(e).opacity'))<1
+            assert card.locator('.robot-stage').evaluate('e=>getComputedStyle(e).filter')=='none'
+            assert not card.locator('.robot-zzz').is_visible()
+            assert card.locator('.robot-body').evaluate('e=>getComputedStyle(e).animationName')=='breathe'
+            assert card.locator('.robot-eyes').evaluate('e=>getComputedStyle(e).animationName')=='blink'
+        assert '分钟未更新' not in page.locator('#role-cards').inner_text()
+        assert '团队状态或快照' not in page.locator('#role-cards').inner_html()
+    # Fresh account wins over an old legacy snapshot and old per-account source.
+    legacy=json.loads((ROOT/'tests/fixtures/snapshot.json').read_text())
+    legacy['generated_at']=old
+    page.route('**/paper/snapshot.json?*',lambda r:r.fulfill(json=legacy))
+    a['updated_at']=old
+    page.reload(wait_until='networkidle')
+    page.wait_for_function("() => document.querySelectorAll('.state-idle.motion-idle').length===6 && document.querySelector('#pinned-time').textContent.includes('延迟')")
+    # A stale account snapshot overrides even a fresh legacy snapshot/team.
+    legacy['generated_at']=team['generated_at']=team['status']['updated_at']=ts
+    account['updated_at']=old
+    page.reload(wait_until='networkidle')
+    page.wait_for_function("() => document.querySelectorAll('.state-offline').length===6")
     assert page.locator('.state-offline').count()==6
-    assert page.locator('.robot-body').first.evaluate('e=>getComputedStyle(e).animationName')=='none'
-    assert page.locator('.state-offline .robot-zzz').first.is_visible()
+    for card in page.locator('.role-card').all():
+        assert card.locator('.robot-body').evaluate('e=>getComputedStyle(e).animationName')=='none'
+        assert card.locator('.robot-eyes').evaluate('e=>getComputedStyle(e).animationName')=='none'
+        assert card.locator('.robot-stage').evaluate('e=>getComputedStyle(e).filter')=='grayscale(1)'
+        assert card.locator('.robot-zzz').is_visible()
+        assert '快照超过 15 分钟未更新' in card.inner_text()
+    assert page.locator('[class*="motion-"]').count()==0
+    # Snapshot refresh recovers idle immediately, even with an expired team.
+    account['updated_at']=ts;team['status']['updated_at']=old
+    page.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+    page.wait_for_function("() => document.querySelectorAll('.state-idle.motion-idle').length===6")
+    # On first load without account.json, legacy snapshot freshness is authoritative.
+    page.route('**/paper/account.json?*',lambda r:r.fulfill(json={}))
+    page.reload(wait_until='networkidle')
+    page.wait_for_function("() => document.querySelectorAll('.state-idle.motion-idle').length===6 && document.querySelector('#alerts').textContent.includes('账户快照')")
+    legacy['generated_at']=old
+    page.reload(wait_until='networkidle')
+    page.wait_for_function("() => document.querySelectorAll('.state-offline').length===6")
+    # A non-default threshold applies to the browser's account snapshot too.
+    page.route('**/paper/account.json?*',lambda r:r.fulfill(json=account))
+    account['updated_at']=stamp(now-timedelta(minutes=2))
+    config=(ROOT/'config.js').read_text().replace('offlineMinutes: 15','offlineMinutes: 1')
+    page.route('**/config.js',lambda r:r.fulfill(body=config,content_type='text/javascript'))
+    page.reload(wait_until='networkidle')
+    page.wait_for_function("() => document.querySelectorAll('.state-offline').length===6 && document.querySelector('.team-task').textContent.includes('快照超过 1 分钟')")
     no_overflow(page);assert not errors and not network,(errors,network)
     low=context.new_page();low.add_init_script("Object.defineProperty(navigator,'hardwareConcurrency',{get:()=>2});Object.defineProperty(navigator,'deviceMemory',{get:()=>2})")
     low.goto(BASE,wait_until='domcontentloaded');low.wait_for_selector('.role-card');no_overflow(low)
@@ -204,13 +272,15 @@ def contracts(browser):
     assert low.locator('.role-card').first.evaluate('e=>getComputedStyle(e).backdropFilter')=='none'
     assert not errors and not network,(errors,network)
     context.close()
-    print('隔离契约：报价重算、实盘标签/新成交提示、低端设备降级、首载静默/新报告去重、开仓/止损/停手、reduced-motion、离线、控制台=0：通过。')
+    print('隔离契约：报价重算、实盘标签/新成交提示、低端设备降级、新报告/交易动作、reduced-motion、团队过期待命呼吸眨眼、快照离线/恢复/回退/配置阈值、控制台=0：通过。')
 
 
 def main():
     with sync_playwright() as p:
         browser=p.chromium.launch(executable_path=CHROME,headless=True,args=['--no-sandbox','--disable-dev-shm-usage'])
-        try:contracts(browser);real_artifacts(browser)
+        try:
+            from portfolio_browser import contracts as portfolio_contracts
+            contracts(browser);portfolio_contracts(browser);real_artifacts(browser)
         finally:browser.close()
 
 if __name__=='__main__':main()

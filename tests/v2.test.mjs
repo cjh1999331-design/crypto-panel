@@ -10,14 +10,38 @@ const team={schema_version:1,generated_at:ts,status:{updated_at:ts,roles:Object.
 const p={symbol:'BTC-USDT-SWAP',side:1,qty:2,entry:100,margin:25,mark_price:98};
 const account=(positions=[p])=>({id:'paper_main',status:'运行中',balance:100,equity:96,day:'2026-11-02',day_start:100,positions});
 const data=(accounts=[account()])=>({accounts});
-test('离线边界：源状态和生成快照独立过期；空值、未来、显式离线',()=>{
+test('只有账户快照超时才离线，默认 15 分钟与配置边界',()=>{
  assert.equal(isStale(ts,now+900000),false);assert.equal(isStale(ts,now+900001),true);
  assert.equal(isStale(null,now),true);assert.equal(isStale(new Date(now+60001).toISOString(),now),true);
- assert.equal(roleState(team,'tech',{now}).state,'working');
- for(const modified of [{...team,generated_at:'2026-11-02T11:44:59Z'}, {...team,status:{...team.status,updated_at:'2026-11-02T11:44:59Z'}}])assert.equal(roleState(modified,'tech',{now}).state,'offline');
- assert.equal(roleState(team,'unknown',{now}).reason,'暂无角色状态');
- assert.equal(roleState({...team,status:{...team.status,roles:{tech:{status:'离线'}}}},'tech',{now}).state,'offline');
- assert.equal(roleState(team,'tech',{now:now+120000,offlineMinutes:1}).state,'offline');
+ const freshTeam={...team,generated_at:null,status:{...team.status,updated_at:null}};
+ for(const d of [team,freshTeam,null]) {
+  assert.notEqual(roleState(d,'tech',{now:now+900000,snapshotAt:ts}).state,'offline');
+  const resolved=roleState(d,'tech',{now:now+900001,snapshotAt:ts});
+  assert.equal(resolved.state,'offline');assert.equal(resolved.reason,'快照超过 15 分钟未更新');
+  assert.notEqual(roleState(d,'tech',{now:now+60000,snapshotAt:ts,offlineMinutes:1}).state,'offline');
+  assert.equal(roleState(d,'tech',{now:now+60001,snapshotAt:ts,offlineMinutes:1}).state,'offline');
+ }
+ for(const snapshotAt of [null,undefined,'invalid',new Date(now+60001).toISOString()])
+  assert.equal(roleState(team,'tech',{now,snapshotAt}).state,'idle');
+});
+test('快照新鲜时，过期、缺失和显式离线的团队状态统一待命',()=>{
+ const options={now,snapshotAt:ts};
+ for(const status of ['工作中','已完成','待命','离线']) {
+  const d=structuredClone(team);for(const r of Object.values(d.status.roles))r.status=status;
+  assert.equal(roleState(d,'tech',options).state,({'工作中':'working','已完成':'done','待命':'idle','离线':'idle'})[status]);
+  for(const timestamp of ['2026-11-02T11:44:59Z',null,'invalid','2026-11-02T12:01:01Z']) for(const field of ['generated_at','updated_at']) {
+   const modified=structuredClone(d);
+   if(field==='generated_at')modified.generated_at=timestamp;else modified.status.updated_at=timestamp;
+   for(const role of Object.keys(ROLES))assert.equal(roleState(modified,role,options).state,'idle');
+   const html=teamCards(modified,{},options);
+   assert.equal((html.match(/state-idle motion-idle/g)||[]).length,6);
+   assert.doesNotMatch(html,/state-offline|motion-working|motion-done|团队状态或快照|分钟未更新/);
+  }
+ }
+ assert.deepEqual(roleState(team,'unknown',options),{status:'待命',state:'idle',reason:'暂无角色状态'});
+ const boundary={...team,generated_at:'2026-11-02T11:45:00Z',status:{...team.status,updated_at:'2026-11-02T11:45:00Z'}};
+ assert.equal(roleState(boundary,'tech',options).state,'working');
+ assert.equal(roleState(boundary,'tech',{...options,now:now+1}).state,'idle');
 });
 test('新增记录：首载静默、重排/删除/旧记录回流静默、重复条数和同秒新增',()=>{
  const detector=new NewRecords(),a={ts,id:'a',role:'tech'},b={ts,id:'b',role:'risk'};
@@ -29,10 +53,10 @@ test('新增记录：首载静默、重排/删除/旧记录回流静默、重复
  const anonymous=new NewRecords();anonymous.update([c]);assert.deepEqual(anonymous.update([c,c]),[c]);assert.deepEqual(anonymous.update([c,c]),[]);
 });
 test('reduced-motion/隐藏/离线不生成动画类，六个 SVG 无像素与外部素材',()=>{
- const options={now,reduced:true};const html=teamCards(team,{},options);
+ const options={now,snapshotAt:ts,reduced:true};const html=teamCards(team,{},options);
  assert.doesNotMatch(html,/motion-working|motion-idle|effect-/);
  assert.equal(animationClasses('idle',{reduced:true}),'');assert.equal(animationClasses('working',{hidden:true}),'');assert.equal(animationClasses('offline'),'');
- assert.match(teamCards(team,{}, {now}),/motion-working/);
+ assert.match(teamCards(team,{}, {now,snapshotAt:ts}),/motion-working/);
  for(const role of Object.keys(ROLES)){assert.match(robotSVG(role),/class="robot"/);assert.doesNotMatch(robotSVG(role),/crispEdges|<image|https?:/);}
  const css=readFileSync(new URL('../assets/style.css',import.meta.url),'utf8');assert.match(css,/@media\(prefers-reduced-motion:reduce\)/);assert.match(css,/animation:none!important/);assert.doesNotMatch(css,/Press Start|pixel|crispEdges/);
 });
@@ -73,12 +97,12 @@ test('WS：指数退避、连续失败回退、有效数据才标实时、清理
  stream.start();let socket=Socket.last;socket.onopen();assert.equal(stream.state,'离线');assert.match(socket.sent,/subscribe/);
  socket.onmessage({data:JSON.stringify({data:['invalid']})});assert.equal(stream.state,'离线');
  socket.onmessage({data:JSON.stringify({data:['valid']})});assert.equal(stream.state,'实时');
- stream.stop();assert.equal(stream.timers.size,0);assert.equal(socket.closed,true);
+ stream.stop();assert.equal(stream.timers.size,0);assert.equal(socket.closed,true);assert.match(socket.sent,/unsubscribe/);assert.equal(socket.onmessage,null);
  stream.stopped=false;stream.later=(fn,ms)=>{stream.pending={fn,ms};};stream.failed();assert.equal(stream.pending.ms,1000);stream.failed();assert.equal(stream.state,'轮询');stream.stop();
 });
 test('实时 K 线只替换最后一根或追加；成交/持仓标记映射到对应 K 线',()=>{
  const bars=[{time:100,close:1},{time:200,close:2}];assert.equal(mergeCandle(bars,{time:50}),bars);
  assert.equal(mergeCandle(bars,{time:200,close:3}).at(-1).close,3);assert.equal(mergeCandle(bars,{time:300}).length,3);
- const timestamp=new Date(210000).toISOString();const d={accounts:[{positions:[{...p,entry_time:timestamp}],fills:[{symbol:p.symbol,kind:'open',side:1,timestamp}]}]};
+ const timestamp=new Date(210000).toISOString();const d={accounts:[{id:'paper_main',positions:[{...p,entry_time:timestamp}],fills:[{symbol:p.symbol,kind:'open',side:1,timestamp}]}]};
  const markers=tradeMarkers(d,p.symbol,bars);assert.equal(markers.length,1);assert.equal(markers[0].time,200);assert.match(markers[0].text,/开仓多/);
 });

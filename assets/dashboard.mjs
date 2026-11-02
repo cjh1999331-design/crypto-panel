@@ -9,10 +9,9 @@ function validRisk(r) {
 }
 export function validSnapshot(data) {
   return data?.schema_version === 1 && Number.isFinite(Date.parse(data.generated_at)) && Array.isArray(data.accounts) && data.accounts.length > 0 &&
-    new Set(data.accounts.map(a => a.id)).size === data.accounts.length && data.accounts.every(a => /^paper_[a-z0-9_]+$/.test(a.id) && (a.status === undefined || ['运行中','已停止'].includes(a.status)) && finite(a.balance) && finite(a.marked_equity) &&
+    new Set(data.accounts.map(a => a.id)).size === data.accounts.length && data.accounts.every(a => /^paper_[a-z0-9_]+$/.test(a.id) && (a.status === undefined || ['运行中','已停止','暂停'].includes(a.status)) && finite(a.balance) && finite(a.marked_equity) &&
       Array.isArray(a.positions) && a.positions.every(p => /^[A-Z0-9]+-USDT-SWAP$/.test(p.symbol) && [-1, 1].includes(p.side) && ['qty', 'entry', 'stop', 'margin'].every(k => finite(p[k])) && p.qty > 0) &&
-      Array.isArray(a.trades) && Array.isArray(a.equity) && a.equity.length <= 500 && a.equity.every(p => finite(p.equity) && Number.isFinite(Date.parse(p.timestamp))) && a.risk &&
-      validRisk(a.risk));
+      Array.isArray(a.trades) && Array.isArray(a.equity) && a.equity.length <= 500 && a.equity.every(p => finite(p.equity) && Number.isFinite(Date.parse(p.timestamp))) && (a.pause?.reset && a.status==='暂停' && a.risk===null || validRisk(a.risk)));
 }
 export function accountMetrics(account, tickers = [], now = Date.now()) {
   const prices = new Map(tickers.map(t => [t.id, t.last]));
@@ -38,7 +37,7 @@ export function roomMetrics(snapshot, tickers, now = Date.now()) {
     locked: accounts.some(a => a.locked), incompleteDay: accounts.some(a => a.loss === null), live: accounts.every(a => a.live) };
 }
 export function technicalStatus(bars) {
-  const data = analyze(bars);
+  const data = analyze(bars,{rsi:25,trend:.02});
   if (!data.ready) return { count: null, cross: '等待已收盘数据' };
   const i = data.bars.length - 1;
   const [fast, slow, prevFast, prevSlow] = [data.e20[i], data.e50[i], data.e20[i - 1], data.e50[i - 1]];
