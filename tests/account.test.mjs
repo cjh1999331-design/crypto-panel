@@ -44,10 +44,32 @@ test('8% 精确停手边界、事件窗口起止和策略状态优先级',()=>{
  const a={...account(),balance:92,equity:92};
  assert.equal(summarizeAccounts(data([a]),[],now).accounts[0].state,'已停手');
 });
-test('合计权益曲线按真实观测时间对齐；不回填首次记录以前的金额',()=>{
+test('权益曲线只使用主力盘真实观测点，会议盘和旧盘不参与',()=>{
  const point=(h,equity)=>({timestamp:`2026-11-02T0${h}:00:00Z`,equity});
  const a={...account(),equity_curve:[point(1,100),point(3,102)]},b={...account('paper_meeting'),equity_curve:[point(2,80),point(3,81)]};
- const curve=aggregateCurve([a,b]);assert.deepEqual(curve.map(p=>p.value),[180,183]);
- assert.equal(curve[0].time,Date.parse('2026-11-02T02:00:00Z')/1000);
- assert.deepEqual(aggregateCurve([a,{...b,equity_curve:[]}]),[]);
+ const curve=aggregateCurve([a,b]);assert.deepEqual(curve.map(p=>p.value),[100,102]);
+ assert.equal(curve[0].time,Date.parse('2026-11-02T01:00:00Z')/1000);
+ assert.deepEqual(aggregateCurve([a,{...b,equity_curve:[]}]),curve);
+ assert.deepEqual(aggregateCurve([b]),[]);
+});
+test('余额、日亏、成交和持仓只取 paper_main，缺主力盘不回退其他账户',()=>{
+ const main=account(),meeting={...account('paper_meeting'),balance:900,equity:900,daily_pnl:-100,
+  positions:[{symbol:'ETH-USDT-SWAP'}],fills:[{notional:900}]};
+ const summary=summarizeAccounts(data([meeting,main,account('paper_1h')]),[],now);
+ assert.equal(summary.balance,100);assert.equal(summary.equity,100);assert.equal(summary.accounts.length,1);
+ assert.equal(summary.positions.length,0);assert.equal(summary.fills.length,0);assert.equal(summary.accounts[0].loss,0);
+ assert.equal(summarizeAccounts(data([meeting]),[],now),null);
+});
+test('会议挂单可缺字段，五种状态与 manual 持仓可校验',()=>{
+ const rows=['pending','filled','expired','rejected','cancelled'].map(status=>({status}));
+ assert.equal(validAccount(data([{...account(),manual_status:rows}])),true);
+ for(const manual_status of [null,{},[{status:'unknown'}],[{status:'pending',limit:-1}],[{status:'filled',valid_until:'bad'}]])
+  assert.equal(validAccount(data([{...account(),manual_status}])),false);
+});
+test('当前启用策略及入场模式字段接受合法配置、拒绝非法模式',()=>{
+  const a={...account(),enabled_strategies:['mean_reversion'],entry_mode_by_strategy:{mean_reversion:'maker'}};
+  assert.equal(validAccount(data([a])),true);
+  assert.equal(validAccount(data([{...a,enabled_strategies:'mean_reversion'}])),false);
+  assert.equal(validAccount(data([{...a,enabled_strategies:['mean_reversion','mean_reversion']}])),false);
+  assert.equal(validAccount(data([{...a,entry_mode_by_strategy:{mean_reversion:'limit'}}])),false);
 });

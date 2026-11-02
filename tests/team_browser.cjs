@@ -6,12 +6,13 @@ const { execFileSync } = require('node:child_process');
 const root = path.resolve(__dirname,'..');
 const fixture = name => JSON.parse(fs.readFileSync(path.join(__dirname,'fixtures',name),'utf8'));
 const populated = JSON.parse(execFileSync('python3',['-c',"import sys,json;sys.path.insert(0,'tools');from make_snapshot import build_team;print(json.dumps(build_team('tests/fixtures/team')))"],{cwd:root,encoding:'utf8'}));
+populated.generated_at=populated.status.updated_at=new Date().toISOString();
 const market = fixture('market.json');
 const snapshot = fixture('snapshot.json');
 // Adapt the existing account fixtures to the public account.json contract.
 const publicSnapshot = {
  mode:'paper',source:'测试公开快照',updated_at:snapshot.generated_at,
- accounts:snapshot.accounts.filter(a=>['paper_main','paper_meeting'].includes(a.id)).map(a=>({
+ accounts:snapshot.accounts.filter(a=>a.id==='paper_main').map(a=>({
   ...a,mode:'paper',equity:a.marked_equity,daily_pnl:a.day_start==null?null:a.marked_equity-a.day_start,
   daily_loss_limit:a.risk.daily_loss_limit,equity_curve:a.equity,fills:[],strategies:{},strategy_enabled:true,
  })),decisions:{status:'missing',symbols:{},blackout_windows:[]}
@@ -23,6 +24,7 @@ const base = process.env.PANEL_URL || 'http://127.0.0.1:8018/';
  const browser = await chromium.launch({executablePath:process.env.CHROME_PATH || '/usr/bin/google-chrome',headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
  try {
   const page=await browser.newPage({viewport:{width:1600,height:1100}});
+  await page.routeWebSocket('**/ws/v5/**',ws=>ws.onMessage(message=>{if(message==='ping')ws.send('pong')}));
   const errors=[];
   page.on('pageerror',e=>errors.push(e.message));
   page.on('console',m=>{if(m.type()==='error')errors.push(m.text())});
@@ -41,11 +43,11 @@ const base = process.env.PANEL_URL || 'http://127.0.0.1:8018/';
   await page.waitForFunction(()=>document.querySelector('#team-updated').textContent.includes('团队待命'));
   await page.waitForFunction(()=>document.querySelectorAll('#conditions li').length===6 && document.querySelectorAll('#price-chart canvas').length>0);
   assert.equal(await page.locator('.role-card').count(),6);
-  assert.equal(await page.locator('.team-badge.idle').count(),6);
+  assert.equal(await page.locator('.team-badge.offline').count(),6);
   assert.equal(await page.locator('.grade-none').count(),6);
   assert.equal(await page.locator('#team-timeline').innerText(),'暂无记录');
   await page.screenshot({path:path.join(artifacts,'team-empty-desktop.png')});
-  console.log('真实数据 HTTP 加载通过；空团队示例：6 张待命卡、无评级、暂无记录');
+  console.log('真实数据 HTTP 加载通过；空团队示例：6 张离线卡、无评级、暂无记录');
 
   await page.route('**/paper/team.json?*',route=>route.fulfill({json:populated}));
   await page.route('**/paper/snapshot.json?*',route=>route.fulfill({json:snapshot}));
@@ -53,14 +55,15 @@ const base = process.env.PANEL_URL || 'http://127.0.0.1:8018/';
   await page.reload();
   await page.evaluate(()=>{document.querySelector('#timeline-fold').open=true;});
   await page.waitForFunction(()=>document.querySelectorAll('.team-entry').length===8);
-  await page.waitForFunction(()=>document.querySelector('[data-role="trader"]').textContent.includes('209.00'));
+  await page.waitForFunction(()=>document.querySelector('[data-role="trader"]').textContent.includes('104.00'));
   assert.equal(await page.locator('.team-badge.working').count(),2);
   assert.equal(await page.locator('.team-badge.done').count(),2);
   assert.equal(await page.locator('.team-badge.idle').count(),2);
-  assert.match(await page.locator('[data-role="risk"] .team-metric').innerText(),/当前 0 仓 · 2 个盘/);
-  assert.match(await page.locator('[data-role="trader"] .team-metric').innerText(),/当前合计权益 209.00 USDT/);
+  assert.match(await page.locator('[data-role="risk"] .team-metric').innerText(),/当前 0 仓 · 1 个盘/);
+  assert.match(await page.locator('[data-role="trader"] .team-metric').innerText(),/主力盘权益 104.00 USDT/);
+  await page.waitForFunction(()=>document.querySelector('[data-role="tech"] .team-metric').textContent.includes('1 小时六条件'));
   assert.match(await page.locator('[data-role="tech"] .team-metric').innerText(),/1 小时六条件/);
-  assert.equal(await page.locator('#room-risk-params .risk-config').count(),2);
+  assert.equal(await page.locator('#room-risk-params .risk-config').count(),1);
   assert.match(await page.locator('.team-entry').first().innerText(),/20:40 UTC\+7/);
   assert.match(await page.locator('.team-entry').first().innerText(),/P6/);
   await page.screenshot({path:path.join(artifacts,'team-populated-desktop.png')});
@@ -107,9 +110,9 @@ const base = process.env.PANEL_URL || 'http://127.0.0.1:8018/';
   await page.route('**/paper/account.json?*',route=>route.fulfill({json:{...publicSnapshot,updated_at:'2026-11-02T13:41:00Z',accounts:publicSnapshot.accounts.map(a=>({...a,status:'已停止',strategy_enabled:false}))}}));
   await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));
   await page.waitForFunction(()=>document.querySelector('#strategy-states').textContent.includes('已停止'));
-  assert.match(await page.locator('[data-role="trader"] .team-metric').innerText(),/209.00/);
+  assert.match(await page.locator('[data-role="trader"] .team-metric').innerText(),/104.00/);
   assert.equal(await page.locator('#team-timeline').innerText(),'暂无记录');
-  assert.equal(await page.locator('#total-equity').innerText(),'209.00');
+  assert.equal(await page.locator('#total-equity').innerText(),'104.00');
   assert.deepEqual(errors,[]);
   console.log('历史盘标签/灰色，停止后保留真实资金/团队刷新为空，手机 390/360/320 无溢出：通过；控制台与页面异常：0');
   console.log('截图：'+artifacts);

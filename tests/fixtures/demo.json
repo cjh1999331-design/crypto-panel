@@ -1,0 +1,122 @@
+{
+  "label": "演示数据",
+  "team": {
+    "schema_version": 1,
+    "generated_at": "2026-11-02T12:00:00Z",
+    "status": {
+      "updated_at": "2026-11-02T12:00:00Z",
+      "meeting": "演示数据",
+      "roles": {
+        "umi": {
+          "status": "待命",
+          "task": "演示数据 · 动画预览",
+          "last_report": {
+            "ts": "2026-11-02T12:00:00Z",
+            "title": "演示报告",
+            "summary": "此为演示场景，不代表实际工作或交易。",
+            "grade": "A-"
+          }
+        },
+        "tech": {
+          "status": "待命",
+          "task": "演示数据 · 动画预览",
+          "last_report": {
+            "ts": "2026-11-02T12:00:00Z",
+            "title": "演示报告",
+            "summary": "此为演示场景，不代表实际工作或交易。",
+            "grade": "B+"
+          }
+        },
+        "industry": {
+          "status": "待命",
+          "task": "演示数据 · 动画预览",
+          "last_report": {
+            "ts": "2026-11-02T12:00:00Z",
+            "title": "演示报告",
+            "summary": "此为演示场景，不代表实际工作或交易。",
+            "grade": "A-"
+          }
+        },
+        "news": {
+          "status": "待命",
+          "task": "演示数据 · 动画预览",
+          "last_report": {
+            "ts": "2026-11-02T12:00:00Z",
+            "title": "演示报告",
+            "summary": "此为演示场景，不代表实际工作或交易。",
+            "grade": "B+"
+          }
+        },
+        "risk": {
+          "status": "待命",
+          "task": "演示数据 · 动画预览",
+          "last_report": {
+            "ts": "2026-11-02T12:00:00Z",
+            "title": "演示报告",
+            "summary": "此为演示场景，不代表实际工作或交易。",
+            "grade": "A-"
+          }
+        },
+        "trader": {
+          "status": "待命",
+          "task": "演示数据 · 动画预览",
+          "last_report": {
+            "ts": "2026-11-02T12:00:00Z",
+            "title": "演示报告",
+            "summary": "此为演示场景，不代表实际工作或交易。",
+            "grade": "B+"
+          }
+        }
+      }
+    },
+    "log": []
+  },
+  "scenes": [
+    {
+      "at": 0,
+      "status": "待命",
+      "label": "待机 · 呼吸与眨眼"
+    },
+    {
+      "at": 1300,
+      "status": "工作中",
+      "label": "工作中 · 打字、头晃、屏幕扫光"
+    },
+    {
+      "at": 2600,
+      "status": "工作中",
+      "effect": "report",
+      "label": "新报告 · 起身挥手与文件传递"
+    },
+    {
+      "at": 3900,
+      "status": "工作中",
+      "effect": "excited",
+      "label": "开仓 · 跳跃举手"
+    },
+    {
+      "at": 5200,
+      "status": "工作中",
+      "effect": "warning",
+      "sign": "止损",
+      "label": "止损平仓 · 举牌"
+    },
+    {
+      "at": 6500,
+      "status": "工作中",
+      "effect": "warning",
+      "sign": "停手",
+      "label": "日停手 · 举牌"
+    },
+    {
+      "at": 7800,
+      "status": "已完成",
+      "label": "已完成 · 勾选"
+    },
+    {
+      "at": 9000,
+      "status": "离线",
+      "label": "离线 · 灰度、zzz、停止动作"
+    }
+  ]
+}

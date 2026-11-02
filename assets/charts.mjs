@@ -1,15 +1,15 @@
 import { ema, rsi, macd } from './indicators.mjs';
-export const COLORS = ['#b6ff3b', '#79bfff', '#ffce70', '#c995ff', '#70e3be', '#ff9d63', '#e788ca', '#b5c7cf'];
-const up = '#b6ff3b', down = '#ff647c';
+export const COLORS = ['#22d3ee', '#79bfff', '#ffce70', '#c995ff', '#70e3be', '#ff9d63', '#e788ca', '#b5c7cf'];
+const up = '#34d399', down = '#fb7185';
 const formatter = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Bangkok', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 export function chartAvailable() { return Boolean(globalThis.LightweightCharts); }
 function makeChart(element) {
   const chart = LightweightCharts.createChart(element, {
     width: element.clientWidth, height: element.clientHeight,
-    layout: { background: { color: '#0b100c' }, textColor: '#91a283', fontSize: 10, fontFamily: 'JetBrains Mono, monospace' },
-    grid: { vertLines: { color: '#1c281a' }, horzLines: { color: '#1c281a' } },
-    rightPriceScale: { borderColor: '#34442b', minimumWidth: 78 },
-    timeScale: { borderColor: '#34442b', timeVisible: true, secondsVisible: false, rightOffset: 3,
+    layout: { background: { color: '#10172c' }, textColor: '#96a7c4', fontSize: 10, fontFamily: 'JetBrains Mono, monospace' },
+    grid: { vertLines: { color: '#ffffff08' }, horzLines: { color: '#ffffff08' } },
+    rightPriceScale: { borderColor: '#ffffff15', minimumWidth: 78 },
+    timeScale: { borderColor: '#ffffff15', timeVisible: true, secondsVisible: false, rightOffset: 3,
       tickMarkFormatter: time => formatter.format(new Date(Number(time) * 1000)) },
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
     localization: { locale: 'zh-CN', timeFormatter: time => formatter.format(new Date(Number(time) * 1000)) },
@@ -61,6 +61,7 @@ export function createCandleCharts() {
       price.timeScale().setVisibleLogicalRange(range || { from: Math.max(0, bars.length - 100), to: bars.length + 2 });
       initialized = true;
     },
+    markers(rows) { candles.setMarkers(rows); },
     reset() { price.timeScale().fitContent(); },
     destroy() { groups.forEach((g, i) => { g.chart.timeScale().unsubscribeVisibleLogicalRangeChange(subscriptions[i]); g.destroy(); }); },
   };
@@ -79,7 +80,7 @@ export function createEquityChart(accounts) {
 // The home balance curve contains only the current public snapshot's accounts.
 export function createBalanceChart(points) {
   const group=makeChart(document.getElementById('equity-chart'));
-  const series=group.chart.addAreaSeries({topColor:'#b6ff3b48',bottomColor:'#b6ff3b02',lineColor:'#b6ff3b',lineWidth:2,priceLineVisible:false,lastValueVisible:false});
+  const series=group.chart.addAreaSeries({topColor:'#22d3ee48',bottomColor:'#22d3ee02',lineColor:'#22d3ee',lineWidth:2,priceLineVisible:false,lastValueVisible:false});
   series.setData(points);
   group.chart.timeScale().fitContent();
   return group;

@@ -1,15 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { ROLES, validTeam, teamCards, teamTime, filteredLogs, timelineMarkup, gradeMarkup } from '../assets/team.mjs';
+import { ROLES, validTeam, teamCards as cards, teamTime, filteredLogs, timelineMarkup, gradeMarkup } from '../assets/team.mjs';
 const data = JSON.parse(execFileSync('python3',['-c', `import sys,json;sys.path.insert(0,'tools');from make_snapshot import build_team;print(json.dumps(build_team('tests/fixtures/team')))`],{encoding:'utf8'}));
-test('团队空数据：六张待命卡、无评级、暂无记录', () => {
+data.generated_at=data.status.updated_at;
+const teamCards=(d,details)=>cards(d,details,{now:Date.parse(data.status.updated_at)});
+test('团队空数据：六张离线卡、无评级、暂无记录', () => {
   const empty = {schema_version:1,status:{roles:{}},log:[]};
   assert.equal(validTeam(empty),true);
   const cards=teamCards(empty);
   assert.equal((cards.match(/class="role-card/g)||[]).length,6);
   for (const name of Object.values(ROLES)) assert.ok(cards.includes(name));
-  assert.equal((cards.match(/>待命</g)||[]).length,6);
+  assert.equal((cards.match(/>离线</g)||[]).length,6);
   assert.equal((cards.match(/grade-none/g)||[]).length,6);
   assert.match(timelineMarkup(empty),/暂无记录/);
   assert.equal(teamTime(null),'—');
@@ -48,4 +50,17 @@ test('所有文本转义，最新日志优先于较旧的状态报告，不接�
   assert.equal(validTeam({...data,log:[{...data.log[0],grade:'G'}]}),false);
   assert.equal(validTeam({...data,log:[{...data.log[0],ts:'2026-11-02T13:00:00'}]}),false);
   assert.equal(validTeam({...data,status:{roles:[]}}),false);
+});
+test('A–F 支持可选加减号，展示保留符号并按字母着色',()=>{
+  for(const letter of 'ABCDEF') for(const sign of ['', '+', '-']) {
+    const grade=letter+sign,changed=structuredClone(data);
+    changed.log[0].grade=grade;changed.status.roles.tech.last_report.grade=grade;
+    assert.equal(validTeam(changed),true);
+    assert.ok(gradeMarkup(grade).includes(`>${grade}</strong>`));
+    assert.ok(gradeMarkup(grade).includes('AB'.includes(letter)?'grade-good':letter==='C'?'grade-mid':'grade-bad'));
+  }
+  for(const grade of ['A++','A+-','G+','a-',' A','']) {
+    assert.equal(validTeam({...data,log:[{...data.log[0],grade}]}),false);
+    assert.match(gradeMarkup(grade),/grade-none/);
+  }
 });

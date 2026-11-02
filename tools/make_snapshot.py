@@ -6,6 +6,8 @@ import json
 import math
 import os
 import re
+import ipaddress
+from urllib.parse import urlsplit
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -18,7 +20,7 @@ REASONS = {'signal', 'stop', 'stop_live', 'liquidated', 'end', 'end_of_data', 't
 # 已于 2026-11-02 20:31 UTC+7 停止，保留历史曲线与成交。
 ARCHIVED_ACCOUNTS = {account_id for account_id, _ in ACCOUNTS}
 TEAM_ROLES = dict(umi='umi 主席', tech='技术', industry='行业', news='新闻政策', risk='风控', trader='操盘')
-TEAM_STATUSES = {'工作中', '已完成', '待命'}
+TEAM_STATUSES = {'工作中', '已完成', '待命', '离线'}
 SENSITIVE = re.compile(r'\u9648\u5bb6\u8c6a|[A-Za-z0-9+/]{24,}={0,2}|api[_-]?key|secret|passphrase|'
                        r'[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|(?:账户|账号|account)\s*[:：=]|\b1[3-9]\d{9}\b', re.I)
 
@@ -34,102 +36,110 @@ def sensitive(value):
     return False
 
 
-def team_ts(value):
+class TeamFieldError(ValueError):
+    def __init__(self, field, reason='invalid'):
+        self.field, self.reason = field, reason
+        super().__init__(field)
+
+
+def team_ts(value, field='ts'):
     if not isinstance(value, str) or not re.match(r'^\d{4}-\d{2}-\d{2}T', value):
-        raise ValueError('团队时间格式无效')
-    dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
-    if dt.tzinfo is None or dt.utcoffset() is None:
-        raise ValueError('团队时间缺少时区')
-    return dt.astimezone(timezone.utc).isoformat(timespec='microseconds').replace('+00:00', 'Z')
+        raise TeamFieldError(field, 'invalid_timestamp')
+    try:
+        dt = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        if dt.tzinfo is None or dt.utcoffset() is None:
+            raise TeamFieldError(field, 'missing_timezone')
+        return dt.astimezone(timezone.utc).isoformat(timespec='microseconds').replace('+00:00', 'Z')
+    except (ValueError, OverflowError) as exc:
+        if isinstance(exc, TeamFieldError): raise
+        raise TeamFieldError(field, 'invalid_timestamp') from None
 
 
 def team_text(row, key, limit=None, empty=False):
     value = row.get(key)
     if not isinstance(value, str) or (not empty and not value.strip()):
-        raise ValueError('团队文本字段无效')
+        raise TeamFieldError(key, 'invalid_text')
     return value[:limit] if limit else value
 
 
+def team_enum(row, key, choices):
+    if not isinstance(row.get(key), str) or row[key] not in choices:
+        raise TeamFieldError(key, 'invalid_enum')
+    return row[key]
+
+
 def clean_report(row):
-    if not isinstance(row, dict) or row.get('grade') not in (None, 'A', 'B', 'C', 'D', 'E', 'F'):
-        raise ValueError('团队评级无效')
+    if not isinstance(row, dict): raise TeamFieldError('last_report', 'expected_object')
+    grade = row.get('grade')
+    if grade is not None and (not isinstance(grade, str) or not re.fullmatch(r'[A-F][+-]?', grade)):
+        raise TeamFieldError('grade', 'expected_A_F_optional_sign')
     return dict(ts=team_ts(row.get('ts')), title=team_text(row, 'title', 40),
-                summary=team_text(row, 'summary', 200), grade=row.get('grade'))
+                summary=team_text(row, 'summary', 200), grade=grade)
 
 
 def build_team(team_root, now=None):
     root = Path(team_root)
     warnings = dict(invalid_log=0, invalid_status=0, redacted_log=0, redacted_status=0,
                     duplicate_log=0, missing_files=0)
+    def warn(counter, field, reason, **location):
+        warnings[counter] += 1
+        warnings.setdefault('details', []).append(dict(source='team_log.jsonl' if counter.endswith('log') else 'team_status.json',
+                                                      field=field, reason=reason, **location))
     status = dict(updated_at=None, meeting=None, phase=None, roles={})
     logs = []
     try:
         with (root / 'team_log.jsonl').open(encoding='utf-8') as handle:
-            for line in handle:
-                if not line.strip():
-                    continue
+            for line_number, line in enumerate(handle, 1):
+                if not line.strip(): continue
                 try:
                     raw = json.loads(line)
                 except ValueError:
-                    warnings['invalid_log'] += 1
-                    continue
+                    warn('invalid_log', 'json', 'malformed_json', line=line_number); continue
                 if sensitive(raw):
-                    warnings['redacted_log'] += 1
-                    continue
+                    warn('redacted_log', 'record', 'sensitive_content', line=line_number); continue
                 try:
+                    if not isinstance(raw, dict): raise TeamFieldError('record', 'expected_object')
                     row = clean_report(raw)
-                    if raw.get('role') not in TEAM_ROLES or raw.get('status') not in TEAM_STATUSES or raw.get('phase') not in {f'P{i}' for i in range(8)}:
-                        raise ValueError('团队枚举无效')
-                    row.update(role=raw['role'], status=raw['status'], phase=raw['phase'], meeting=team_text(raw, 'meeting'))
-                    if 'id' in raw:
-                        row['id'] = team_text(raw, 'id')
+                    row.update(role=team_enum(raw, 'role', TEAM_ROLES), status=team_enum(raw, 'status', TEAM_STATUSES),
+                               phase=team_enum(raw, 'phase', {f'P{i}' for i in range(8)}), meeting=team_text(raw, 'meeting'))
+                    if 'id' in raw: row['id'] = team_text(raw, 'id')
                     logs.append(row)
-                except (ValueError, TypeError, OverflowError):
-                    warnings['invalid_log'] += 1
-    except FileNotFoundError:
-        warnings['missing_files'] += 1
-    except (OSError, UnicodeError):
-        warnings['invalid_log'] += 1
+                except TeamFieldError as exc:
+                    warn('invalid_log', exc.field, exc.reason, line=line_number)
+    except FileNotFoundError: warnings['missing_files'] += 1
+    except (OSError, UnicodeError): warn('invalid_log', 'file', 'unreadable', line=0)
     unique, anonymous = {}, []
     for row in logs:
-        if 'id' not in row:
-            anonymous.append(row)
+        if 'id' not in row: anonymous.append(row)
         else:
             previous = unique.get(row['id'])
-            if previous:
-                warnings['duplicate_log'] += 1
-            if previous is None or row['ts'] >= previous['ts']:
-                unique[row['id']] = row
+            if previous: warnings['duplicate_log'] += 1
+            if previous is None or row['ts'] >= previous['ts']: unique[row['id']] = row
     try:
         raw = json.loads((root / 'team_status.json').read_text(encoding='utf-8'))
-        if not isinstance(raw, dict) or not isinstance(raw.get('roles'), dict):
-            raise ValueError('团队状态无效')
+        if not isinstance(raw, dict): raise TeamFieldError('record', 'expected_object')
+        if not isinstance(raw.get('roles'), dict): raise TeamFieldError('roles', 'expected_object')
         metadata = {k: v for k, v in raw.items() if k != 'roles'}
         if sensitive(metadata):
-            warnings['redacted_status'] += 1
-            raw = {'roles': {}}
-        else:
-            # 初始待命文件允许三个元数据字段全部为空。
-            if any(raw.get(k) is not None for k in ('updated_at', 'meeting', 'phase')):
-                if raw.get('phase') not in {f'P{i}' for i in range(8)}:
-                    raise ValueError('团队阶段无效')
-                status.update(updated_at=team_ts(raw.get('updated_at')), meeting=team_text(raw, 'meeting'), phase=raw['phase'])
+            warn('redacted_status', 'metadata', 'sensitive_content', role='metadata'); raw = {'roles': {}}
+        elif any(raw.get(k) is not None for k in ('updated_at', 'meeting', 'phase')):
+            phase = team_enum(raw, 'phase', {f'P{i}' for i in range(8)})
+            status.update(updated_at=team_ts(raw.get('updated_at'), 'updated_at'), meeting=team_text(raw, 'meeting'), phase=phase)
         for role, record in raw['roles'].items():
+            location = role if role in TEAM_ROLES else 'unknown'
             if sensitive(role) or sensitive(record):
-                warnings['redacted_status'] += 1
-                continue
+                warn('redacted_status', 'record', 'sensitive_content', role=location); continue
             try:
-                if role not in TEAM_ROLES or not isinstance(record, dict) or record.get('status') not in TEAM_STATUSES:
-                    raise ValueError('团队角色状态无效')
-                status['roles'][role] = dict(name=TEAM_ROLES[role], status=record['status'],
+                if role not in TEAM_ROLES: raise TeamFieldError('role', 'invalid_enum')
+                if not isinstance(record, dict): raise TeamFieldError('record', 'expected_object')
+                status['roles'][role] = dict(name=TEAM_ROLES[role], status=team_enum(record, 'status', TEAM_STATUSES),
                     task=team_text(record, 'task', 200, empty=True),
                     last_report=clean_report(record['last_report']) if record.get('last_report') is not None else None)
-            except (ValueError, TypeError, OverflowError):
-                warnings['invalid_status'] += 1
-    except FileNotFoundError:
-        warnings['missing_files'] += 1
-    except (OSError, UnicodeError, ValueError, TypeError, OverflowError):
-        warnings['invalid_status'] += 1
+            except TeamFieldError as exc:
+                warn('invalid_status', exc.field, exc.reason, role=location)
+    except FileNotFoundError: warnings['missing_files'] += 1
+    except TeamFieldError as exc: warn('invalid_status', exc.field, exc.reason, role='metadata')
+    except (OSError, UnicodeError, ValueError): warn('invalid_status', 'json', 'unreadable_or_malformed', role='metadata')
     return dict(schema_version=1, generated_at=(now or datetime.now(timezone.utc)).isoformat(), status=status,
                 log=sorted([*anonymous, *unique.values()], key=lambda r: r['ts'], reverse=True)[:200], warnings=warnings)
 
@@ -178,7 +188,39 @@ def clean_position(symbol, data):
     if result['margin'] is None or result['margin'] < 0:
         raise ValueError('持仓保证金不完整')
     result['entry_time'] = iso(data.get('entry_time'))
+    result['strategy'] = data.get('strategy') if data.get('strategy') in ('ema', 'breakout', 'mean_reversion', 'manual') else None
     return result
+
+
+def clean_manual_status(raw):
+    """会议手工单只公开展示字段，不复制订单 ID、备注或运行器原因。"""
+    rows = raw.values() if isinstance(raw, dict) else raw if isinstance(raw, list) else []
+    result = []
+    for row in rows:
+        if not isinstance(row, dict) or row.get('status') not in ('pending', 'filled', 'expired', 'rejected', 'cancelled'):
+            continue
+        order = row.get('order') if isinstance(row.get('order'), dict) else row
+        symbol = order.get('symbol', order.get('instId', row.get('symbol')))
+        side = order.get('side')
+        item = dict(symbol=symbol if isinstance(symbol, str) and SYMBOL.fullmatch(symbol) else None,
+                    side=1 if side in (1, 'long') else -1 if side in (-1, 'short') else None,
+                    status=row['status'], valid_until=iso(order.get('valid_until')))
+        for key, alias in (('limit', 'entry'), ('stop', 'stop'), ('take_profit', 'target')):
+            value = numeric(order.get(key, order.get('limit_price' if key == 'limit' else alias, order.get(alias))))
+            item[key] = value if value is not None and value > 0 else None
+        result.append(item)
+    return result
+
+
+def manual_status(directory, state):
+    rows = clean_manual_status(state.get('manual_status'))
+    if rows:
+        return rows
+    try:
+        scan = json.loads((directory / 'scan.json').read_text(encoding='utf-8'))
+        return clean_manual_status(scan.get('manual_status')) if isinstance(scan, dict) else []
+    except (OSError, ValueError, UnicodeError):
+        return []
 
 
 def clean_trade(data, kind='close'):
@@ -283,14 +325,15 @@ def build_account(root, account_id, name, now=None):
                 equity=downsample([curve[t] for t in sorted(curve)]), risk=risk,
                 updated_at=updated, initial=numeric(state.get('initial')),
                 day=state.get('day') if re.fullmatch(r'\d{4}-\d{2}-\d{2}', str(state.get('day', ''))) else None,
-                day_start=numeric(state.get('day_start')))
+                day_start=numeric(state.get('day_start')),
+                **(dict(manual_status=manual_status(directory, state)) if account_id == 'paper_main' else {}))
 
 
 def build_snapshot(source_root, now=None):
     generated = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).isoformat().replace('+00:00', 'Z')
     root = Path(source_root)
-    names = dict(ACCOUNTS, paper_main='主力盘', paper_meeting='交易室盘')
-    directories = sorted(p for p in root.glob('paper_*') if p.is_dir() and re.fullmatch(r'paper_[a-z0-9_]+', p.name))
+    names = dict(ACCOUNTS, paper_main='主力盘')
+    directories = sorted(p for p in root.glob('paper_*') if p.is_dir() and p.name in names)
     directories.sort(key=lambda p: (list(names).index(p.name) if p.name in names else len(names), p.name))
     if not directories:
         raise ValueError('没有模拟盘目录')
@@ -342,7 +385,7 @@ def build_public_accounts(root, now=None, legacy=None):
     day = datetime.fromtimestamp(now.timestamp() + 7 * 3600, timezone.utc).date().isoformat()
     decisions = build_decisions(root)
     accounts = []
-    for account_id, name in [('paper_main', '主力策略'), ('paper_meeting', '会议策略')]:
+    for account_id, name in [('paper_main', '主力策略')]:
         directory = root / account_id
         if not directory.exists():
             accounts.append(dict(id=account_id, name=name, mode='paper', status='未启动', equity=None,
@@ -373,9 +416,161 @@ def build_public_accounts(root, now=None, legacy=None):
             daily_loss_limit=account['risk']['daily_loss_limit'], positions=account['positions'], fills=fills,
             equity_curve=account['equity'], updated_at=iso(raw.get('updated_at')) or account['updated_at'], initial=account['initial'],
             day=account['day'], day_start=account['day_start'], risk=account['risk'], strategies=strategies,
-            strategy_enabled=status not in ('已停止',)))
+            enabled_strategies=[s for s in raw.get('enabled_strategies',strategies) if s in strategies],
+            entry_mode_by_strategy={s:raw.get('entry_mode_by_strategy',{}).get(s,raw.get('entry_mode','taker'))
+                for s in strategies if raw.get('entry_mode_by_strategy',{}).get(s,raw.get('entry_mode','taker')) in ('maker','taker')},
+            strategy_enabled=status not in ('已停止',), manual_status=account.get('manual_status', [])))
     return dict(mode='paper', source='本地模拟盘公开快照', updated_at=now.isoformat().replace('+00:00', 'Z'),
                 accounts=accounts, decisions=decisions)
+
+
+def build_scan(root, now=None):
+    """Only publish scan fields; never execute the runner or write its directory."""
+    path=Path(root)/'paper_main'/'scan.json'
+    empty=dict(schema_version=1,generated_at=None,source_status='missing',instruments=[],recent_signals=[],positions=[])
+    if not path.exists(): return empty
+    raw=json.loads(path.read_text(encoding='utf-8'))
+    if not isinstance(raw,dict) or raw.get('schema_version')!=1 or not iso(raw.get('generated_at')):
+        raise ValueError('扫描快照格式无效')
+    rows=[]
+    strategies=('mean_reversion','breakout')
+    def symbol(value): return isinstance(value,str) and bool(SYMBOL.fullmatch(value))
+    for row in raw.get('instruments',[]):
+        if not isinstance(row,dict) or not symbol(row.get('instId')): continue
+        rows.append(dict(instId=row['instId'],quote_24h=numeric(row.get('quote_24h')),spread=numeric(row.get('spread')),
+            leverage_cap=numeric(row.get('leverage_cap')),bar_ts=numeric(row.get('bar_ts')),
+            signals={s:row.get('signals',{}).get(s) if row.get('signals',{}).get(s) in (-1,1) else None for s in strategies},
+            signal_status=row.get('signal_status') if row.get('signal_status') in ('ok','insufficient_candles','unavailable') else 'unavailable',
+            held=row.get('held') is True))
+    recent=[]
+    cutoff=(now or datetime.now(timezone.utc)).timestamp()-48*3600
+    for row in raw.get('recent_signals',[]):
+        stamp=iso(row.get('timestamp'))
+        if (not symbol(row.get('instId')) or row.get('strategy') not in strategies or row.get('side') not in (-1,1)
+                or not stamp or not cutoff<=datetime.fromisoformat(stamp.replace('Z','+00:00')).timestamp()<=cutoff+48*3600): continue
+        reason=row.get('reason')
+        # Failure codes only; arbitrary source text is never published.
+        reason=reason if isinstance(reason,str) and re.fullmatch(r'[a-z][a-z0-9_]{0,63}',reason) else None
+        recent.append(dict(timestamp=stamp,instId=row['instId'],strategy=row['strategy'],side=row['side'],
+                           opened=row.get('opened') is True,reason=reason))
+    positions=[dict(instId=r['instId'],strategy=r.get('strategy') if r.get('strategy') in (*strategies, 'manual') else None,
+                    side=r.get('side') if r.get('side') in (-1,1) else None,entry_time=iso(r.get('entry_time')))
+               for r in raw.get('positions',[]) if isinstance(r,dict) and symbol(r.get('instId'))]
+    return dict(schema_version=1,generated_at=iso(raw['generated_at']),source_status='ok',instruments=rows,
+                recent_signals=sorted(recent,key=lambda r:r['timestamp'],reverse=True),positions=positions,
+                manual_status=clean_manual_status(raw.get('manual_status')))
+
+
+# Runner events use fixed vocabularies. Alerts have a separate publication filter.
+EVENT_TYPES = {'universe_refreshed', 'signal', 'stale_signal_skip', 'risk_skip', 'decision_skip',
+    'trade_opened', 'trade_closed', 'daily_halt', 'config_changed', 'started', 'stopped', 'resumed',
+    'interrupted', 'maker_placed', 'maker_cancelled', 'funding_observed', 'funding', 'network_error',
+    'decision_close', 'skipped_min_size', 'skipped_cap', 'liquidated'}
+EVENT_REASONS = dict(stop='止损', stop_live='止损', stop_loss='止损', take_profit='止盈',
+    liquidated='逐仓强平', liquidation='逐仓强平', daily_halted='日亏触线停手', daily_halt='日亏触线停手',
+    blackout='事件窗口禁开新仓', invalid_decisions='决议无效', bias_long='决议仅允许多头',
+    bias_short='决议仅允许空头', bias_watch='会议决议观察', bias_ban='会议决议禁开仓', ban='会议决议禁开仓',
+    size_factor_zero='仓位系数为零', strategy_disabled='策略未启用', already_held='已有持仓',
+    pending_order='已有挂单', maker_pending='挂单待成交', expired='挂单到期未成交',
+    stale_signal='信号超过入场期限', missing_price='缺少现价', initialize_only='仅初始化',
+    entry_mode_changed='入场方式已更改', risk_or_margin_or_minimum='风险 / 保证金 / 最小数量限制',
+    same_direction_risk='同向风险上限', stop_distance='止损距离限制', risk_or_universe='风险或币池限制',
+    end='策略结束', end_of_data='数据区间结束', signal='策略信号', unknown_instrument='合约不可用')
+
+
+def clean_event(raw):
+    if not isinstance(raw, dict): return None
+    kind = raw.get('event', raw.get('type'))
+    if not isinstance(kind, str) or kind not in EVENT_TYPES: return None
+    try: stamp = team_ts(raw.get('timestamp', raw.get('ts')))
+    except TeamFieldError: return None
+    symbol = raw.get('symbol', raw.get('instId'))
+    symbol = symbol if isinstance(symbol, str) and SYMBOL.fullmatch(symbol) and not sensitive(symbol) else None
+    strategy = raw.get('strategy')
+    strategy = strategy if isinstance(strategy, str) and strategy in ('ema', 'breakout', 'mean_reversion') else None
+    code = raw.get('reason')
+    reason = EVENT_REASONS.get(code, '原因未公开' if code is not None else None) if isinstance(code, (str, type(None))) else '原因未公开'
+    if kind == 'universe_refreshed':
+        count = numeric(raw.get('count'))
+        reason = f'{int(count)} 个币' if count is not None and 0 <= count <= 100000 and count.is_integer() else '币池数量未提供'
+    if kind == 'config_changed': reason = '策略配置已更新'
+    if kind == 'network_error': reason = '公共数据暂不可用'
+    if code == 'daily_halted' and kind == 'risk_skip': kind = 'daily_halt'
+    side = raw.get('side')
+    price = numeric(raw.get('price', raw.get('exit', raw.get('entry', raw.get('reference', raw.get('limit'))))))
+    return dict(ts=stamp, type=kind, coin=symbol, strategy=strategy,
+                direction='多' if side == 1 else '空' if side == -1 else None,
+                price=price if price is not None and price > 0 else None, reason=reason)
+
+
+def build_events(source_root, now=None):
+    from collections import deque
+    events, sources = [], 0
+    for directory in ('paper_main',):
+        try:
+            with (Path(source_root) / directory / 'events.jsonl').open(encoding='utf-8') as handle:
+                recent = deque(handle, maxlen=300)
+            sources += 1
+        except (FileNotFoundError, OSError, UnicodeError): continue
+        for line in recent:
+            try: raw = json.loads(line)
+            except ValueError: continue
+            row = clean_event(raw)
+            if row is not None: events.append(row)
+    try:
+        with (Path(source_root) / 'alerts.jsonl').open(encoding='utf-8') as handle:
+            recent_alerts = deque(handle, maxlen=100)
+        sources += 1
+    except (OSError, UnicodeError):
+        recent_alerts = []
+    for line in recent_alerts:
+        try: raw = json.loads(line)
+        except ValueError: continue
+        row = clean_alert(raw)
+        if row is not None: events.append(row)
+    return dict(schema_version=1, generated_at=(now or datetime.now(timezone.utc)).isoformat(),
+                source_status='ok' if sources else 'missing',
+                events=sorted(events, key=lambda r: r['ts'])[-300:])
+
+
+def public_https_url(value):
+    if not isinstance(value, str) or len(value) > 500 or sensitive(value) or re.search(r'[\s\\\x00-\x1f]', value):
+        return None
+    try:
+        url = urlsplit(value)
+        host = (url.hostname or '').lower().rstrip('.')
+        if url.scheme != 'https' or url.username is not None or url.password is not None or url.port not in (None, 443):
+            return None
+        try:
+            if not ipaddress.ip_address(host).is_global: return None
+        except ValueError:
+            if (not re.fullmatch(r'(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,63}', host)
+                    or host.endswith(('.localhost', '.local', '.internal', '.test', '.invalid', '.example', '.home', '.lan'))):
+                return None
+        return value
+    except ValueError:
+        return None
+
+
+def clean_alert(raw):
+    if not isinstance(raw, dict): return None
+    try: stamp = team_ts(raw.get('ts'))
+    except TeamFieldError: return None
+    symbol = raw.get('symbol')
+    if isinstance(symbol, str) and re.fullmatch(r'[A-Z0-9]{1,20}', symbol): symbol += '-USDT-SWAP'
+    symbol = symbol if isinstance(symbol, str) and SYMBOL.fullmatch(symbol) else None
+    parts = []
+    for key in ('type', 'value', 'detail'):
+        value = raw.get(key)
+        if type(value) in (int, float): value = str(value) if numeric(value) is not None else None
+        value = public_text(value, 60)
+        if value and not re.search(r'(?:/workspace/|/home/|/private/|https?://|token\s*[:=])', value, re.I):
+            parts.append(' '.join(value.split()))
+    result = dict(ts=stamp, type='异动', coin=symbol, strategy=None, direction=None, price=None,
+                  reason=' · '.join(parts)[:80] or '市场异动')
+    url = public_https_url(raw.get('source_url'))
+    if url: result['source_url'] = url
+    return result
 
 
 def write_snapshot(snapshot, output):
@@ -456,12 +651,15 @@ def main():
         bt60 = build_bt60(args.results_root or args.source_root / 'results')
         snapshot = None if args.bt60_only else (build_snapshot(args.source_root) if any(args.source_root.glob('paper_*')) else dict(schema_version=1, generated_at=datetime.now(timezone.utc).isoformat(), accounts=[]))
         if snapshot is not None:
+            scan = build_scan(args.source_root)
             public = build_public_accounts(args.source_root, legacy=snapshot)
             from validate_account import validate_account
             validate_account(public)
             write_snapshot(snapshot, args.output)
             write_snapshot(public, args.account_output or args.output.with_name('account.json'))
             write_snapshot(public['decisions'], args.output.with_name('decisions.json'))
+            write_snapshot(scan, args.output.with_name('scan.json'))
+            write_snapshot(build_events(args.source_root), args.output.with_name('events.json'))
         write_snapshot(bt60, args.bt60_output or args.output.with_name('bt60.json'))
         if not args.bt60_only:
             write_snapshot(team, args.team_output or args.output.with_name('team.json'))

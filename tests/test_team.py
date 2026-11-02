@@ -137,5 +137,31 @@ class TeamTests(unittest.TestCase):
         self.assertFalse(output.with_name('team.tmp').exists())
 
 
+class GradeRegressionTests(unittest.TestCase):
+    setUp=TeamTests.setUp
+    build=TeamTests.build
+    def test_signed_grades_preserved_in_status_and_log(self):
+        for letter in 'ABCDEF':
+            for sign in ('', '+', '-'):
+                grade=letter+sign
+                state=copy.deepcopy(self.status)
+                state['roles']['risk']['last_report']['grade']=grade
+                result=self.build([dict(self.row,grade=grade)],state)
+                self.assertEqual(result['log'][0]['grade'],grade)
+                self.assertEqual(result['status']['roles']['risk']['last_report']['grade'],grade)
+                self.assertEqual(result['warnings']['invalid_log'],0)
+                self.assertEqual(result['warnings']['invalid_status'],0)
+
+    def test_invalid_reasons_identify_field_and_location_without_source_text(self):
+        state=copy.deepcopy(self.status)
+        state['roles']['risk']['last_report']['grade']='A++'
+        result=self.build([dict(self.row,grade='A++'),dict(self.row,title=123),dict(self.row,role='DO_NOT_PUBLISH')],state)
+        details=result['warnings']['details']
+        self.assertIn(dict(source='team_log.jsonl',field='grade',reason='expected_A_F_optional_sign',line=1),details)
+        self.assertTrue(any(r.get('line')==2 and r['field']=='title' for r in details))
+        self.assertTrue(any(r.get('role')=='risk' and r['field']=='grade' for r in details))
+        self.assertNotIn('DO_NOT_PUBLISH',json.dumps(result))
+        self.assertNotIn('A++',json.dumps(result))
+
 if __name__ == '__main__':
     unittest.main()

@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
  const page=await browser.newPage({viewport:{width:1440,height:1050}});
  const base=process.env.PANEL_URL || 'http://127.0.0.1:8008/';
  const artifacts=process.env.SCREENSHOT_DIR || '/tmp';
- const errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text())});
+ const errors=[],networkErrors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')(m.text().includes('WebSocket connection')?networkErrors:errors).push(m.text())});
  await page.goto(base);
  await page.waitForFunction(()=>document.querySelectorAll('#conditions li').length===6 && document.querySelectorAll('#price-chart canvas').length>0,{},{timeout:45000});
  await page.waitForTimeout(6000);
@@ -34,6 +34,7 @@ const assert = require('node:assert/strict');
   if(width===390)await page.screenshot({path:artifacts+'/umi-home-mobile.png',fullPage:true});
  }
  console.log('mobile widths 390/360/320: no overflow, 2 columns');
+ console.log('外部 WebSocket 网络错误',networkErrors.length);
  console.log('console/page errors',JSON.stringify(errors));
  assert.deepEqual(errors,[]);
  } finally { await browser.close(); }

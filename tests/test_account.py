@@ -34,7 +34,7 @@ class PublicAccountTests(unittest.TestCase):
 
     def test_absent_accounts_are_null_not_fake_funded(self):
         result = validate_account(build_public_accounts(self.root, self.now))
-        self.assertEqual(len(result['accounts']), 2)
+        self.assertEqual([a['id'] for a in result['accounts']], ['paper_main'])
         for a in result['accounts']:
             self.assertEqual(a['status'], '未启动')
             self.assertIsNone(a['balance'])
@@ -46,7 +46,7 @@ class PublicAccountTests(unittest.TestCase):
     def test_public_snapshot_actual_fills_and_daily_pnl(self):
         self.make_main()
         result = validate_account(build_public_accounts(self.root, self.now))
-        main, missing = result['accounts']
+        main, = result['accounts']
         self.assertEqual(main['daily_pnl'], -5)
         self.assertEqual(main['daily_loss_limit'], .08)
         self.assertEqual([f['notional'] for f in main['fills']], [202,200])
@@ -63,6 +63,39 @@ class PublicAccountTests(unittest.TestCase):
         self.assertEqual(result['accounts'][0]['status'],'已停止')
         self.assertFalse(result['accounts'][0]['strategy_enabled'])
         self.assertEqual(result['accounts'][0]['balance'],100)
+
+    def test_meeting_directory_is_never_read(self):
+        self.make_main()
+        (self.root / 'paper_meeting').mkdir()
+        (self.root / 'paper_meeting/state.json').write_text('{broken')
+        result = validate_account(build_public_accounts(self.root, self.now))
+        self.assertEqual([a['id'] for a in result['accounts']], ['paper_main'])
+
+    def test_manual_status_and_positions_whitelist_and_scan_fallback(self):
+        directory = self.make_main()
+        state = json.loads((directory / 'state.json').read_text())
+        order = dict(symbol='BTC-USDT-SWAP', side='short', entry=100, stop=110, take_profit=80,
+                     valid_until='2026-11-03T18:00:00+07:00', id='PRIVATE_SENTINEL', note='PRIVATE_SENTINEL')
+        statuses = ['pending', 'filled', 'expired', 'rejected', 'cancelled']
+        state['manual_status'] = {str(i): dict(status=s, order=order, reason='PRIVATE_SENTINEL') for i, s in enumerate(statuses)}
+        state['engines'] = {'BTC-USDT-SWAP': dict(position=dict(side=-1,qty=1,entry=100,stop=110,margin=20,strategy='manual'))}
+        state['prices'] = {'BTC-USDT-SWAP': 99}
+        (directory / 'state.json').write_text(json.dumps(state))
+        result = validate_account(build_public_accounts(self.root, self.now))
+        main = result['accounts'][0]
+        self.assertEqual(main['positions'][0]['strategy'], 'manual')
+        self.assertEqual([r['status'] for r in main['manual_status']], statuses)
+        row = main['manual_status'][0]
+        self.assertEqual((row['symbol'],row['side'],row['limit'],row['stop'],row['take_profit']), ('BTC-USDT-SWAP',-1,100,110,80))
+        self.assertEqual(row['valid_until'], '2026-11-03T11:00:00.000000Z')
+        self.assertNotIn('PRIVATE_SENTINEL', json.dumps(result))
+        state.pop('manual_status')
+        (directory / 'state.json').write_text(json.dumps(state))
+        (directory / 'scan.json').write_text(json.dumps(dict(manual_status={'private':dict(status='pending')})))
+        row = validate_account(build_public_accounts(self.root,self.now))['accounts'][0]['manual_status'][0]
+        self.assertIsNone(row['symbol']);self.assertIsNone(row['limit']);self.assertEqual(row['status'],'pending')
+        (directory / 'scan.json').write_text('{broken')
+        self.assertEqual(build_public_accounts(self.root,self.now)['accounts'][0]['manual_status'], [])
 
     def test_decisions_whitelist_and_redaction_before_truncation(self):
         raw = dict(version=2,updated_at=self.now.isoformat(),meeting='公开会议',global_size_factor=.5,
