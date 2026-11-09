@@ -85,15 +85,15 @@ def contracts(browser):
     source['updated_at']=ts;source.pop('pause');source['accounts'][0].update(status='运行中',strategy_enabled=True,daily_loss_limit=.08)
     page.reload(wait_until='networkidle');page.wait_for_selector('#mascot[data-state="idle"]')
     # Latest reports live in the drawer, with source text escaped.
-    team=json.loads((ROOT/'tests/fixtures/demo.json').read_text())['team']
+    team=dict(schema_version=1,status=json.loads((ROOT/'tests/fixtures/team/team_status.json').read_text()),log=[])
     for role,r in team['status']['roles'].items():r['last_report']=dict(ts=ts,title='新报告 <script>',summary='公开摘要',grade='A-')
     context.route('**/paper/team.json?*',lambda r:r.fulfill(json=team))
     page.reload(wait_until='networkidle');page.locator('#mascot-reports').tap()
-    page.wait_for_function("() => document.querySelectorAll('#mascot-report-list article').length===6")
+    page.wait_for_function("() => document.querySelectorAll('#mascot-report-list article').length===4")
     assert '<script>' in page.locator('#mascot-report-list').inner_text();assert page.locator('#mascot-report-list script').count()==0
     assert not errors,errors
     context.close()
-    print('浏览器契约通过：暂停/空状态、鼠标和触摸拖动、点击区分/位置恢复、收起、键盘/Esc抽屉、6成员报告、reduced-motion/低端设备、过期离线、320/360/390无溢出、pageerror=0。')
+    print('浏览器契约通过：暂停/空状态、鼠标和触摸拖动、点击区分/位置恢复、收起、键盘/Esc抽屉、4成员报告、reduced-motion/低端设备、过期离线、320/360/390无溢出、pageerror=0。')
 
 def artifacts(browser):
     # Local public data is never intercepted in this context.

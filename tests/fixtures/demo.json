@@ -7,7 +7,7 @@
       "updated_at": "2026-11-02T12:00:00Z",
       "meeting": "演示数据",
       "roles": {
-        "umi": {
+        "gork": {
           "status": "待命",
           "task": "演示数据 · 动画预览",
           "last_report": {
@@ -17,7 +17,7 @@
             "grade": "A-"
           }
         },
-        "tech": {
+        "claude": {
           "status": "待命",
           "task": "演示数据 · 动画预览",
           "last_report": {
@@ -27,7 +27,7 @@
             "grade": "B+"
           }
         },
-        "industry": {
+        "codex": {
           "status": "待命",
           "task": "演示数据 · 动画预览",
           "last_report": {
@@ -37,27 +37,7 @@
             "grade": "A-"
           }
         },
-        "news": {
-          "status": "待命",
-          "task": "演示数据 · 动画预览",
-          "last_report": {
-            "ts": "2026-11-02T12:00:00Z",
-            "title": "演示报告",
-            "summary": "此为演示场景，不代表实际工作或交易。",
-            "grade": "B+"
-          }
-        },
-        "risk": {
-          "status": "待命",
-          "task": "演示数据 · 动画预览",
-          "last_report": {
-            "ts": "2026-11-02T12:00:00Z",
-            "title": "演示报告",
-            "summary": "此为演示场景，不代表实际工作或交易。",
-            "grade": "A-"
-          }
-        },
-        "trader": {
+        "grok": {
           "status": "待命",
           "task": "演示数据 · 动画预览",
           "last_report": {

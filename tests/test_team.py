@@ -19,16 +19,36 @@ class TeamTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
-        self.row = dict(ts='2026-11-02T20:35:00+07:00', role='risk', phase='P1',
+        self.row = dict(ts='2026-11-02T20:35:00+07:00', role='grok', phase='P1',
                         meeting='示例会议', title='示例报告', summary='等待风险条件满足。',
                         grade='A', status='已完成', id='risk-1')
         self.status = dict(updated_at=self.row['ts'], meeting='示例会议', phase='P1', roles={
-            'risk': dict(name='风控', status='工作中', task='检查风险', last_report={k:self.row[k] for k in ('ts','title','summary','grade')})})
+            'grok': dict(name='Grok', status='工作中', task='检查风险', last_report={k:self.row[k] for k in ('ts','title','summary','grade')})})
 
     def build(self, rows=None, status=None):
         (self.root / 'team_log.jsonl').write_text('\n'.join(json.dumps(r, ensure_ascii=False) for r in (rows or []))+'\n')
         (self.root / 'team_status.json').write_text(json.dumps(self.status if status is None else status, ensure_ascii=False))
         return m.build_team(self.root)
+
+    def test_current_members_and_retired_records_never_reappear(self):
+        self.assertEqual(m.TEAM_ROLES, dict(gork='gork 总指挥',claude='claude',codex='Codex',grok='Grok'))
+        self.assertEqual(m.ROLE_ALIASES, {'umi': 'gork'})
+        state=copy.deepcopy(self.status)
+        rows=[self.row, dict(self.row, id='legacy-umi', role='umi', title='旧主席报告')]
+        for role in ('tech','industry','news','risk','trader'):
+            state['roles'][role]=dict(name='旧成员',status='工作中',task='旧成员任务',last_report=None)
+            rows.append(dict(self.row,id=role,role=role,title='旧成员报告'))
+        state['roles']['umi']=dict(name='umi 主席',status='已完成',task='旧主席任务',last_report=None)
+        result=self.build(rows,state)
+        self.assertEqual(set(result['status']['roles']),{'grok','gork'})
+        self.assertEqual(result['status']['roles']['gork']['name'], 'gork 总指挥')
+        self.assertEqual(sorted(r['role'] for r in result['log']),['gork','grok'])
+        encoded=json.dumps(result,ensure_ascii=False)
+        self.assertNotIn('旧成员',encoded)
+        self.assertNotIn('umi 主席',encoded)
+        self.assertNotIn('"umi"',encoded)
+        self.assertEqual(result['warnings']['invalid_log'],0)
+        self.assertEqual(result['warnings']['invalid_status'],0)
 
     def test_whitelist_truncation_and_latest_id_by_instant(self):
         old = dict(self.row, ts='2026-11-02T19:35:00+07:00', title='旧报告')
@@ -39,7 +59,7 @@ class TeamTests(unittest.TestCase):
         self.assertEqual(result['log'][0]['summary'], '摘'*200)
         self.assertEqual(result['warnings']['duplicate_log'], 1)
         self.assertNotIn('内部备注', json.dumps(result, ensure_ascii=False))
-        self.assertEqual(result['status']['roles']['risk']['name'], '风控')
+        self.assertEqual(result['status']['roles']['grok']['name'], 'Grok')
 
     def test_invalid_fields_skip_and_optional_fields(self):
         invalid = [dict(self.row, **{k:v}) for k,v in [
@@ -55,7 +75,7 @@ class TeamTests(unittest.TestCase):
         self.assertNotIn('id', result['log'][0])
 
     def test_all_roles_phases_grades_and_statuses(self):
-        rows = [dict(self.row, id=f'row-{i}', role=list(m.TEAM_ROLES)[i%6], phase=f'P{i%8}',
+        rows = [dict(self.row, id=f'row-{i}', role=list(m.TEAM_ROLES)[i%len(m.TEAM_ROLES)], phase=f'P{i%8}',
                      grade=[None,*'ABCDEF'][i%7], status=['工作中','已完成','待命'][i%3]) for i in range(168)]
         result = self.build(rows)
         self.assertEqual(len(result['log']), 168)
@@ -77,13 +97,14 @@ class TeamTests(unittest.TestCase):
 
     def test_status_redaction_discards_whole_role_and_counts(self):
         state = copy.deepcopy(self.status)
-        state['roles']['risk']['last_report']['summary'] = '摘'*201 + 'x'*24
-        state['roles']['trader'] = dict(name='操盘', status='待命', task='', last_report=None, secret='a')
-        state['roles']['tech'] = dict(name='不公开名称', status='待命', task='', last_report=None)
+        state['roles']['grok']['last_report']['summary'] = '摘'*201 + 'x'*24
+        state['roles']['umi'] = dict(name='umi 主席', status='待命', task='', last_report=None, secret='a')
+        state['roles']['codex'] = dict(name='不公开名称', status='待命', task='', last_report=None)
         result = self.build(status=state)
         self.assertEqual(result['warnings']['redacted_status'], 2)
-        self.assertEqual(list(result['status']['roles']), ['tech'])
-        self.assertEqual(result['status']['roles']['tech']['name'], '技术')
+        self.assertEqual(list(result['status']['roles']), ['codex'])
+        self.assertEqual(result['status']['roles']['codex']['name'], 'Codex')
+        self.assertNotIn('umi', json.dumps(result))
         state['meeting'] = 'x'*24
         result = self.build(status=state)
         self.assertEqual(result['status']['roles'], {})
@@ -93,7 +114,7 @@ class TeamTests(unittest.TestCase):
     def test_status_schema_invalid_role_and_report(self):
         for key,value in [('status','错误'), ('task',1), ('last_report',{'ts':'bad'}), ('last_report',[] )]:
             state = copy.deepcopy(self.status)
-            state['roles']['risk'][key] = value
+            state['roles']['grok'][key] = value
             result = self.build(status=state)
             self.assertEqual(result['status']['roles'], {})
             self.assertEqual(result['warnings']['invalid_status'], 1)
@@ -121,8 +142,8 @@ class TeamTests(unittest.TestCase):
         self.assertEqual(result['log'][0]['id'], 'row-249')
         self.assertEqual(result['log'][-1]['id'], 'row-50')
         fixture = m.build_team(FIXTURES / 'team')
-        self.assertEqual(len(fixture['status']['roles']), 6)
-        self.assertEqual(len(fixture['log']), 8)
+        self.assertEqual(len(fixture['status']['roles']), 4)
+        self.assertEqual(len(fixture['log']), 9)
         self.assertTrue(all(v == 0 for v in fixture['warnings'].values()))
 
     def test_team_only_cli_atomic_output_without_account_sources(self):
@@ -133,7 +154,7 @@ class TeamTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertFalse(output.exists())
         data = json.loads(output.with_name('team.json').read_text())
-        self.assertEqual(len(data['log']), 8)
+        self.assertEqual(len(data['log']), 9)
         self.assertFalse(output.with_name('team.tmp').exists())
 
 
@@ -145,21 +166,21 @@ class GradeRegressionTests(unittest.TestCase):
             for sign in ('', '+', '-'):
                 grade=letter+sign
                 state=copy.deepcopy(self.status)
-                state['roles']['risk']['last_report']['grade']=grade
+                state['roles']['grok']['last_report']['grade']=grade
                 result=self.build([dict(self.row,grade=grade)],state)
                 self.assertEqual(result['log'][0]['grade'],grade)
-                self.assertEqual(result['status']['roles']['risk']['last_report']['grade'],grade)
+                self.assertEqual(result['status']['roles']['grok']['last_report']['grade'],grade)
                 self.assertEqual(result['warnings']['invalid_log'],0)
                 self.assertEqual(result['warnings']['invalid_status'],0)
 
     def test_invalid_reasons_identify_field_and_location_without_source_text(self):
         state=copy.deepcopy(self.status)
-        state['roles']['risk']['last_report']['grade']='A++'
+        state['roles']['grok']['last_report']['grade']='A++'
         result=self.build([dict(self.row,grade='A++'),dict(self.row,title=123),dict(self.row,role='DO_NOT_PUBLISH')],state)
         details=result['warnings']['details']
         self.assertIn(dict(source='team_log.jsonl',field='grade',reason='expected_A_F_optional_sign',line=1),details)
         self.assertTrue(any(r.get('line')==2 and r['field']=='title' for r in details))
-        self.assertTrue(any(r.get('role')=='risk' and r['field']=='grade' for r in details))
+        self.assertTrue(any(r.get('role')=='grok' and r['field']=='grade' for r in details))
         self.assertNotIn('DO_NOT_PUBLISH',json.dumps(result))
         self.assertNotIn('A++',json.dumps(result))
 

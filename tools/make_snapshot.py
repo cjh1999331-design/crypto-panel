@@ -19,8 +19,19 @@ SYMBOL = re.compile(r'^[A-Z0-9]+-USDT-SWAP$')
 REASONS = {'signal', 'stop', 'stop_live', 'liquidated', 'end', 'end_of_data', 'take_profit'}
 # 已于 2026-11-02 20:31 UTC+7 停止，保留历史曲线与成交。
 ARCHIVED_ACCOUNTS = {account_id for account_id, _ in ACCOUNTS}
-TEAM_ROLES = dict(umi='umi 主席', tech='技术', industry='行业', news='新闻政策', risk='风控', trader='操盘')
+TEAM_ROLES = dict(gork='gork 总指挥', claude='claude', codex='Codex', grok='Grok')
+ROLE_ALIASES = {'umi': 'gork'}  # 旧日志/状态里的 umi 映射为 gork，界面不再显示 umi
+RETIRED_TEAM_ROLES = {'tech', 'industry', 'news', 'risk', 'trader'}
 TEAM_STATUSES = {'工作中', '已完成', '待命', '离线'}
+
+
+def canonical_team_role(role):
+    """Map legacy aliases; return (canonical_or_original, silent_skip)."""
+    if not isinstance(role, str):
+        return role, False
+    if role in RETIRED_TEAM_ROLES:
+        return None, True
+    return ROLE_ALIASES.get(role, role), False
 SENSITIVE = re.compile(r'\u9648\u5bb6\u8c6a|[A-Za-z0-9+/]{24,}={0,2}|api[_-]?key|secret|passphrase|'
                        r'[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|(?:账户|账号|account)\s*[:：=]|\b1[3-9]\d{9}\b', re.I)
 
@@ -95,10 +106,15 @@ def build_team(team_root, now=None):
                     raw = json.loads(line)
                 except ValueError:
                     warn('invalid_log', 'json', 'malformed_json', line=line_number); continue
+                if not isinstance(raw, dict):
+                    warn('invalid_log', 'record', 'expected_object', line=line_number); continue
+                role, silent = canonical_team_role(raw.get('role'))
+                if silent:
+                    continue
                 if sensitive(raw):
                     warn('redacted_log', 'record', 'sensitive_content', line=line_number); continue
                 try:
-                    if not isinstance(raw, dict): raise TeamFieldError('record', 'expected_object')
+                    raw = dict(raw, role=role)
                     row = clean_report(raw)
                     row.update(role=team_enum(raw, 'role', TEAM_ROLES), status=team_enum(raw, 'status', TEAM_STATUSES),
                                phase=team_enum(raw, 'phase', {f'P{i}' for i in range(8)}), meeting=team_text(raw, 'meeting'))
@@ -125,9 +141,20 @@ def build_team(team_root, now=None):
         elif any(raw.get(k) is not None for k in ('updated_at', 'meeting', 'phase')):
             phase = team_enum(raw, 'phase', {f'P{i}' for i in range(8)})
             status.update(updated_at=team_ts(raw.get('updated_at'), 'updated_at'), meeting=team_text(raw, 'meeting'), phase=phase)
+        pending = []
         for role, record in raw['roles'].items():
-            location = role if role in TEAM_ROLES else 'unknown'
-            if sensitive(role) or sensitive(record):
+            canonical, silent = canonical_team_role(role)
+            if silent:
+                continue
+            pending.append((role, canonical, record))
+        # Prefer an explicit current-role key over a legacy alias that maps to it.
+        pending.sort(key=lambda item: 0 if item[0] in TEAM_ROLES else 1)
+        seen = set()
+        for original, role, record in pending:
+            if role in seen:
+                continue
+            location = role if role in TEAM_ROLES else (original if original in TEAM_ROLES else 'unknown')
+            if sensitive(original) or sensitive(role) or sensitive(record):
                 warn('redacted_status', 'record', 'sensitive_content', role=location); continue
             try:
                 if role not in TEAM_ROLES: raise TeamFieldError('role', 'invalid_enum')
@@ -135,6 +162,7 @@ def build_team(team_root, now=None):
                 status['roles'][role] = dict(name=TEAM_ROLES[role], status=team_enum(record, 'status', TEAM_STATUSES),
                     task=team_text(record, 'task', 200, empty=True),
                     last_report=clean_report(record['last_report']) if record.get('last_report') is not None else None)
+                seen.add(role)
             except TeamFieldError as exc:
                 warn('invalid_status', exc.field, exc.reason, role=location)
     except FileNotFoundError: warnings['missing_files'] += 1

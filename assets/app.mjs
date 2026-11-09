@@ -547,8 +547,8 @@ async function refreshEvents(){
   eventsData=data;if(route==='home')renderPublicHome();$('events-count').textContent=data.events.length+' 条';
   $('events-status').textContent=data.source_status==='missing'?'暂无事件源':`${isStale(data.generated_at,Date.now(),config.offlineMinutes)?'事件快照延迟 · ':''}${time(data.generated_at)} UTC+7 · 每 60 秒同步`;
   for(const event of fresh){
-   if(event.type==='trade_opened'){roleEffect('trader','excited');toast(eventText(event));}
-   if(event.type==='daily_halt' || event.type==='trade_closed' && /止损|强平/.test(event.reason || '')){roleEffect('risk','warning',event.type==='daily_halt'?'停手':'止损');toast(eventText(event));}
+   if(event.type==='trade_opened'){roleEffect('grok','excited');toast(eventText(event));}
+   if(event.type==='daily_halt' || event.type==='trade_closed' && /止损|强平/.test(event.reason || '')){roleEffect('grok','warning',event.type==='daily_halt'?'停手':'止损');toast(eventText(event));}
   }
  }catch{$('events-status').textContent='事件快照读取失败 · 保留已有记录';}
  finally{eventsBusy=false;}

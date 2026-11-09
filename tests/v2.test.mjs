@@ -15,44 +15,44 @@ test('只有账户快照超时才离线，默认 15 分钟与配置边界',()=>{
  assert.equal(isStale(null,now),true);assert.equal(isStale(new Date(now+60001).toISOString(),now),true);
  const freshTeam={...team,generated_at:null,status:{...team.status,updated_at:null}};
  for(const d of [team,freshTeam,null]) {
-  assert.notEqual(roleState(d,'tech',{now:now+900000,snapshotAt:ts}).state,'offline');
-  const resolved=roleState(d,'tech',{now:now+900001,snapshotAt:ts});
+  assert.notEqual(roleState(d,'codex',{now:now+900000,snapshotAt:ts}).state,'offline');
+  const resolved=roleState(d,'codex',{now:now+900001,snapshotAt:ts});
   assert.equal(resolved.state,'offline');assert.equal(resolved.reason,'快照超过 15 分钟未更新');
-  assert.notEqual(roleState(d,'tech',{now:now+60000,snapshotAt:ts,offlineMinutes:1}).state,'offline');
-  assert.equal(roleState(d,'tech',{now:now+60001,snapshotAt:ts,offlineMinutes:1}).state,'offline');
+  assert.notEqual(roleState(d,'codex',{now:now+60000,snapshotAt:ts,offlineMinutes:1}).state,'offline');
+  assert.equal(roleState(d,'codex',{now:now+60001,snapshotAt:ts,offlineMinutes:1}).state,'offline');
  }
  for(const snapshotAt of [null,undefined,'invalid',new Date(now+60001).toISOString()])
-  assert.equal(roleState(team,'tech',{now,snapshotAt}).state,'idle');
+  assert.equal(roleState(team,'codex',{now,snapshotAt}).state,'idle');
 });
 test('快照新鲜时，过期、缺失和显式离线的团队状态统一待命',()=>{
  const options={now,snapshotAt:ts};
  for(const status of ['工作中','已完成','待命','离线']) {
   const d=structuredClone(team);for(const r of Object.values(d.status.roles))r.status=status;
-  assert.equal(roleState(d,'tech',options).state,({'工作中':'working','已完成':'done','待命':'idle','离线':'idle'})[status]);
+  assert.equal(roleState(d,'codex',options).state,({'工作中':'working','已完成':'done','待命':'idle','离线':'idle'})[status]);
   for(const timestamp of ['2026-11-02T11:44:59Z',null,'invalid','2026-11-02T12:01:01Z']) for(const field of ['generated_at','updated_at']) {
    const modified=structuredClone(d);
    if(field==='generated_at')modified.generated_at=timestamp;else modified.status.updated_at=timestamp;
    for(const role of Object.keys(ROLES))assert.equal(roleState(modified,role,options).state,'idle');
    const html=teamCards(modified,{},options);
-   assert.equal((html.match(/state-idle motion-idle/g)||[]).length,6);
+   assert.equal((html.match(/state-idle motion-idle/g)||[]).length,4);
    assert.doesNotMatch(html,/state-offline|motion-working|motion-done|团队状态或快照|分钟未更新/);
   }
  }
  assert.deepEqual(roleState(team,'unknown',options),{status:'待命',state:'idle',reason:'暂无角色状态'});
  const boundary={...team,generated_at:'2026-11-02T11:45:00Z',status:{...team.status,updated_at:'2026-11-02T11:45:00Z'}};
- assert.equal(roleState(boundary,'tech',options).state,'working');
- assert.equal(roleState(boundary,'tech',{...options,now:now+1}).state,'idle');
+ assert.equal(roleState(boundary,'codex',options).state,'working');
+ assert.equal(roleState(boundary,'codex',{...options,now:now+1}).state,'idle');
 });
 test('新增记录：首载静默、重排/删除/旧记录回流静默、重复条数和同秒新增',()=>{
- const detector=new NewRecords(),a={ts,id:'a',role:'tech'},b={ts,id:'b',role:'risk'};
+ const detector=new NewRecords(),a={ts,id:'a',role:'codex'},b={ts,id:'b',role:'grok'};
  assert.deepEqual(detector.update([a]),[]);assert.deepEqual(detector.update([a]),[]);
  assert.deepEqual(detector.update([b,a]),[b]);assert.deepEqual(detector.update([a,b]),[]);
  detector.update([]);assert.deepEqual(detector.update([a]),[]);
- const c={ts:new Date(now+1000).toISOString(),role:'news'};assert.deepEqual(detector.update([c]),[c]);
+ const c={ts:new Date(now+1000).toISOString(),role:'grok'};assert.deepEqual(detector.update([c]),[c]);
  assert.deepEqual(detector.update([{...b,id:'older'}]),[]);
  const anonymous=new NewRecords();anonymous.update([c]);assert.deepEqual(anonymous.update([c,c]),[c]);assert.deepEqual(anonymous.update([c,c]),[]);
 });
-test('reduced-motion/隐藏/离线不生成动画类，六个 SVG 无像素与外部素材',()=>{
+test('reduced-motion/隐藏/离线不生成动画类，四个 SVG 无像素与外部素材',()=>{
  const options={now,snapshotAt:ts,reduced:true};const html=teamCards(team,{},options);
  assert.doesNotMatch(html,/motion-working|motion-idle|effect-/);
  assert.equal(animationClasses('idle',{reduced:true}),'');assert.equal(animationClasses('working',{hidden:true}),'');assert.equal(animationClasses('offline'),'');

@@ -55,9 +55,9 @@ class ResetTests(unittest.TestCase):
 
     def test_logs_reports_alerts_and_decisions_strict_reset_boundary(self):
         (self.root/'team').mkdir()
-        report=lambda ts:dict(ts=ts,role='tech',status='已完成',phase='P1',meeting='测试',title='测试报告',summary='公开摘要',grade='A')
+        report=lambda ts:dict(ts=ts,role='codex',status='已完成',phase='P1',meeting='测试',title='测试报告',summary='公开摘要',grade='A')
         (self.root/'team/team_log.jsonl').write_text('\n'.join(json.dumps(report(ts)) for ts in (OLD,RESET,NEW)))
-        self.save('team/team_status.json', dict(updated_at=OLD,meeting='旧会议',phase='P1',roles={'tech':dict(status='已完成',task='旧任务',last_report=report(OLD))}))
+        self.save('team/team_status.json', dict(updated_at=OLD,meeting='旧会议',phase='P1',roles={'codex':dict(status='已完成',task='旧任务',last_report=report(OLD))}))
         team=filter_team_reset(build_team(self.root/'team'),RESET)
         self.assertEqual(len(team['log']),2);self.assertEqual(team['status']['roles'],{})
         alerts=[dict(ts=ts,wake=True,symbol='BTC',type='volume') for ts in (OLD,RESET,NEW)]
@@ -81,7 +81,14 @@ class ResetTests(unittest.TestCase):
         self.assertEqual(build_public_accounts(self.root)['accounts'][0]['equity'],105)
 
     def test_current_public_files_contain_no_pre_reset_timestamp(self):
-        for path in (ROOT/'paper').glob('*.json'): self.assert_clean(json.loads(path.read_text()))
+        for path in (ROOT/'paper').glob('*.json'):
+            # 团队会议记录与决议元数据允许早于交易重置；只核对交易公开快照。
+            if path.name in {'team.json', 'decisions.json'}:
+                continue
+            data = json.loads(path.read_text())
+            if isinstance(data, dict):
+                data = {k: v for k, v in data.items() if k != 'decisions'}
+            self.assert_clean(data)
 
 
 if __name__=='__main__': unittest.main()

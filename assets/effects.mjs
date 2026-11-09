@@ -35,7 +35,7 @@ export function roleEffect(role,kind,label='止损'){
  const timers=effectTimers.get(card)||new Map();clearTimeout(timers.get(kind));
  timers.set(kind,setTimeout(()=>{card.classList.remove('effect-'+kind);timers.delete(kind);},2600));effectTimers.set(card,timers);
  if(kind==='report'){
-  const target=document.querySelector('[data-role="umi"]');if(!target)return;
+  const target=document.querySelector('[data-role="gork"]');if(!target)return;
   const a=card.getBoundingClientRect(),b=target.getBoundingClientRect();
   const dot=document.createElement('span');dot.className='report-particle';dot.textContent='▤';
   dot.style.cssText=`left:${a.left+a.width/2}px;top:${a.top+70}px;--dx:${b.left+b.width/2-a.left-a.width/2}px;--dy:${b.top-a.top}px;--role-color:${getComputedStyle(card).getPropertyValue('--role-color')}`;

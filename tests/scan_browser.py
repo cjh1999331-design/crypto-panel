@@ -38,7 +38,7 @@ def main():
             page.wait_for_function("() => document.querySelector('#chart-symbol').value==='SOL-USDT-SWAP' && document.querySelector('#scan-count').textContent==='3 币'")
             assert page.locator('#scan-body tr').count()==3
             assert '今日会议标的 ZEC' in page.locator('#meeting-target').inner_text()
-            assert '会议标的' in page.locator('[data-role="umi"] .team-metric').inner_text()
+            assert '会议标的' in page.locator('[data-role="gork"] .team-metric').inner_text()
             assert ''.join(page.locator('#enabled-strategies').inner_text().split())=='均值回归maker'
             assert page.locator('#scan-held button').count()==2
             assert 'maker 待成交' in page.locator('#scan-recent').inner_text()

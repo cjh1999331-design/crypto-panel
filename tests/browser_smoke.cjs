@@ -14,7 +14,7 @@ const assert = require('node:assert/strict');
  console.log('cards',await page.locator('#role-cards').innerText());
  console.log('chart errors',await page.locator('#chart-error').isVisible(),await page.locator('#equity-error').isVisible());
  console.log('overflow desktop',await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth));
- await page.screenshot({path:artifacts+'/umi-home-desktop.png',fullPage:true});
+ await page.screenshot({path:artifacts+'/panel-home-desktop.png',fullPage:true});
  await page.locator('#home-page [data-timeframe="4H"]').click();await page.waitForFunction(()=>document.querySelector('#analysis-period').innerText.includes('4 小时'));
  assert.match(await page.locator('.role-card').nth(1).innerText(),/1 小时/);
  await page.locator('[data-nav="market"]').click();
@@ -31,7 +31,7 @@ const assert = require('node:assert/strict');
   await page.setViewportSize({width,height:844});await page.waitForTimeout(300);
   const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth);assert.equal(overflow,false,`overflow ${width}`);
   assert.equal(await page.locator('.role-cards').evaluate(el=>getComputedStyle(el).gridTemplateColumns.split(' ').length),2);
-  if(width===390)await page.screenshot({path:artifacts+'/umi-home-mobile.png',fullPage:true});
+  if(width===390)await page.screenshot({path:artifacts+'/panel-home-mobile.png',fullPage:true});
  }
  console.log('mobile widths 390/360/320: no overflow, 2 columns');
  console.log('外部 WebSocket 网络错误',networkErrors.length);
